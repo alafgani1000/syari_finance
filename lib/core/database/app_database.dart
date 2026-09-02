@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -13,8 +14,39 @@ class AppDatabase {
   static const schemaVersion = 3;
 
   Database? _database;
+  Completer<void>? _restoreCompleter;
+  Future<Database>? _openingDatabase;
 
-  Future<Database> get database async => _database ??= await openDatabase(
+  Future<Database> get database async {
+    final restoring = _restoreCompleter;
+    if (restoring != null) await restoring.future;
+
+    final current = _database;
+    if (current != null && current.isOpen) return current;
+    _database = null;
+
+    final existingOpening = _openingDatabase;
+    if (existingOpening != null) return existingOpening;
+
+    final opening = _openConfiguredDatabase();
+    _openingDatabase = opening;
+    try {
+      final opened = await opening;
+      _database = opened;
+      return opened;
+    } finally {
+      if (identical(_openingDatabase, opening)) {
+        _openingDatabase = null;
+      }
+    }
+  }
+
+  Future<void> waitUntilReady() async {
+    final restoring = _restoreCompleter;
+    if (restoring != null) await restoring.future;
+  }
+
+  Future<Database> _openConfiguredDatabase() async => openDatabase(
         await databasePath,
         version: schemaVersion,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
@@ -104,40 +136,62 @@ class AppDatabase {
   Future<void> restoreBytes(Uint8List restoredBytes) async {
     final path = await databasePath;
     final source = File(path);
-    final temporary = File(path + '.restore_tmp');
-    final rollback = File(path + '.pre_restore');
+    final temporary = File('$path.restore_tmp');
+    final rollback = File('$path.pre_restore');
 
     await temporary.writeAsBytes(restoredBytes, flush: true);
+    Completer<void>? restoreCompleter;
     try {
       await _validateDatabase(temporary.path);
+      restoreCompleter = Completer<void>();
+      _restoreCompleter = restoreCompleter;
+
       await close();
       if (await source.exists()) {
         await source.copy(rollback.path);
       }
       await temporary.copy(path);
-      await database;
+      _database = await _openConfiguredDatabase();
       await _validateDatabase(path);
       if (await rollback.exists()) {
         await rollback.delete();
       }
     } catch (_) {
-      await close();
-      if (await rollback.exists()) {
-        await rollback.copy(path);
+      if (restoreCompleter != null) {
+        await close();
+        if (await rollback.exists()) {
+          await rollback.copy(path);
+        }
+        _database = await _openConfiguredDatabase();
       }
       rethrow;
     } finally {
       if (await temporary.exists()) {
         await temporary.delete();
       }
-      await database;
+      _database ??= await _openConfiguredDatabase();
+      _restoreCompleter = null;
+      restoreCompleter?.complete();
     }
   }
 
   Future<void> close() async {
-    final openDatabase = _database;
+    final current = _database;
+    final opening = _openingDatabase;
     _database = null;
-    await openDatabase?.close();
+
+    if (current != null && current.isOpen) {
+      await current.close();
+    }
+    if (opening != null) {
+      final opened = await opening;
+      if (!identical(opened, current) && opened.isOpen) {
+        await opened.close();
+      }
+      if (identical(_database, opened)) {
+        _database = null;
+      }
+    }
   }
 
   Future<void> _validateDatabase(String path) async {

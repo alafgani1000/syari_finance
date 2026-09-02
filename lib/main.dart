@@ -93,7 +93,7 @@ class AppShell extends StatelessWidget {
             ),
             IconButton(
               tooltip: 'Data dan backup',
-              onPressed: () => context.push('/settings'),
+              onPressed: () => context.go('/settings'),
               icon: const Icon(Icons.settings_outlined),
             ),
           ]),

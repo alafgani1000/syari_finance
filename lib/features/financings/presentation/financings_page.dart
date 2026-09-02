@@ -11,6 +11,7 @@ import '../../orders/domain/order.dart';
 class FinancingsPage extends StatefulWidget {
   const FinancingsPage({this.orderId, super.key});
   final String? orderId;
+
   @override
   State<FinancingsPage> createState() => _FinancingsPageState();
 }
@@ -20,10 +21,11 @@ class _FinancingsPageState extends State<FinancingsPage> {
   final _repository = FinancingRepository();
   final _customerRepository = CustomerRepository();
   final _orderRepository = OrderRepository();
+  final _searchController = TextEditingController();
+
   bool _loading = true;
   String _filter = 'all';
   String _query = '';
-  final _searchController = TextEditingController();
   int _sequence = 1;
 
   @override
@@ -69,33 +71,47 @@ class _FinancingsPageState extends State<FinancingsPage> {
     if (!mounted) return;
     if (customers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tambahkan nasabah terlebih dahulu')));
+        const SnackBar(content: Text('Tambahkan nasabah terlebih dahulu')),
+      );
       return;
     }
     final result = await showModalBottomSheet<Financing>(
-        context: context,
-        isScrollControlled: true,
-        showDragHandle: true,
-        builder: (_) => _FinancingFormSheet(
-            number:
-                'MRB-${DateTime.now().year}-${_sequence.toString().padLeft(6, '0')}',
-            customers: customers,
-            order: order));
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _FinancingFormSheet(
+        number: 'MRB-' +
+            DateTime.now().year.toString() +
+            '-' +
+            _sequence.toString().padLeft(6, '0'),
+        customers: customers,
+        order: order,
+      ),
+    );
     if (!mounted || result == null) return;
     try {
       await _repository.save(result);
+      await _loadFinancings();
       if (!mounted) return;
-      setState(() {
-        _financings.insert(0, result);
-        _sequence++;
-      });
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pembiayaan berhasil disimpan')));
+        const SnackBar(content: Text('Pembiayaan berhasil disimpan')),
+      );
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Gagal menyimpan pembiayaan')));
+          const SnackBar(content: Text('Gagal menyimpan pembiayaan')),
+        );
+      }
     }
+  }
+
+  void _showDetails(Financing financing) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _FinancingDetailSheet(financing: financing),
+    );
   }
 
   @override
@@ -106,117 +122,578 @@ class _FinancingsPageState extends State<FinancingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final visible = _financings
-        .where((item) =>
-            ('${item.number} ${item.customerName} ${item.itemName}')
-                .toLowerCase()
-                .contains(_query.toLowerCase()))
-        .toList();
+    final normalizedQuery = _query.trim().toLowerCase();
+    final visible = _financings.where((item) {
+      final searchable =
+          [item.number, item.customerName, item.itemName].join(' ');
+      final matchesQuery = searchable.toLowerCase().contains(normalizedQuery);
+      final matchesStatus = switch (_filter) {
+        'active' => !item.isPaid,
+        'paid' => item.isPaid,
+        _ => true,
+      };
+      return matchesQuery && matchesStatus;
+    }).toList();
+    final outstanding =
+        _financings.fold<int>(0, (sum, item) => sum + item.outstanding);
+    final activeCount = _financings.where((item) => !item.isPaid).length;
+
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              children: [
-                Text('Pembiayaan',
+          : RefreshIndicator(
+              onRefresh: _loadFinancings,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                children: [
+                  Text(
+                    'Pembiayaan',
                     style: Theme.of(context)
                         .textTheme
                         .headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 4),
-                Text('Kelola pembiayaan murabahah dengan mudah',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: const Color(0xFF68736E))),
-                const SizedBox(height: 20),
-                TextField(
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Pantau akad, angsuran, dan sisa tagihan',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF68736E),
+                        ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _MiniStat(
+                          label: 'Pembiayaan aktif',
+                          value: activeCount.toString(),
+                          icon: Icons.receipt_long_outlined,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _MiniStat(
+                          label: 'Sisa tagihan',
+                          value: formatCurrency(outstanding),
+                          icon: Icons.account_balance_wallet_outlined,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  TextField(
                     controller: _searchController,
                     onChanged: (value) => setState(() => _query = value),
                     decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.search),
-                        hintText: 'Cari nomor, nasabah, atau barang',
-                        suffixIcon: _query.isEmpty
-                            ? null
-                            : IconButton(
-                                onPressed: () {
-                                  _searchController.clear();
-                                  setState(() => _query = '');
-                                },
-                                icon: const Icon(Icons.close)))),
-                const SizedBox(height: 16),
-                SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'all', label: Text('Semua')),
-                      ButtonSegment(value: 'active', label: Text('Aktif')),
-                      ButtonSegment(value: 'paid', label: Text('Lunas'))
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: 'Cari nomor, nasabah, atau barang',
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Hapus pencarian',
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _query = '');
+                              },
+                              icon: const Icon(Icons.close),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(value: 'all', label: Text('Semua')),
+                        ButtonSegment(value: 'active', label: Text('Aktif')),
+                        ButtonSegment(value: 'paid', label: Text('Lunas')),
+                      ],
+                      selected: {_filter},
+                      onSelectionChanged: (value) =>
+                          setState(() => _filter = value.first),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Daftar pembiayaan',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                      ),
+                      Text(
+                        visible.length.toString() + ' data',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF68736E),
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
                     ],
-                    selected: {
-                      _filter
-                    },
-                    onSelectionChanged: (value) =>
-                        setState(() => _filter = value.first)),
-                const SizedBox(height: 20),
-                Row(children: [
-                  Expanded(
-                      child: _MiniStat(
-                          label: 'Total',
-                          value: '${_financings.length}',
-                          icon: Icons.receipt_long_outlined)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: _MiniStat(
-                          label: 'Outstanding',
-                          value: formatCurrency(_financings.fold(0,
-                              (sum, item) => sum + item.calculation.salePrice)),
-                          icon: Icons.account_balance_wallet_outlined))
-                ]),
-                const SizedBox(height: 28),
-                if (visible.isEmpty)
-                  const _FinancingEmptyState()
-                else
-                  ...visible.map((item) => Card(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      child: ListTile(
-                          leading: CircleAvatar(
-                              backgroundColor: Color(0xFFEAF5F0),
-                              child: Icon(Icons.account_balance_wallet_outlined,
-                                  color: Color(0xFF087F5B))),
-                          title: Text(item.customerName,
-                              style: TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text(
-                              '${item.number} • `${item.itemName}\n`${formatCurrency(item.calculation.installment)} / bulan'),
-                          isThreeLine: true,
-                          trailing: const Chip(label: Text('Aktif'))))),
-              ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (visible.isEmpty)
+                    _FinancingEmptyState(
+                      hasFinancings: _financings.isNotEmpty,
+                    )
+                  else
+                    ...visible.map(
+                      (item) => _FinancingCard(
+                        financing: item,
+                        onTap: () => _showDetails(item),
+                      ),
+                    ),
+                ],
+              ),
             ),
     );
   }
 }
 
+class _FinancingCard extends StatelessWidget {
+  const _FinancingCard({required this.financing, required this.onTap});
+
+  final Financing financing;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = financing.calculation.salePrice;
+    final remaining = financing.outstanding.clamp(0, total).toInt();
+    final progress =
+        total <= 0 ? 0.0 : ((total - remaining) / total).clamp(0.0, 1.0);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF5F0),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.account_balance_wallet_outlined,
+                      color: Color(0xFF087F5B),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          financing.customerName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          financing.number,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: const Color(0xFF68736E),
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusBadge(isPaid: financing.isPaid),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.inventory_2_outlined,
+                    size: 18,
+                    color: Color(0xFF68736E),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      financing.itemName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _CardMetric(
+                      label: 'Angsuran / bulan',
+                      value: formatCurrency(
+                        financing.calculation.installment,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _CardMetric(
+                      label: 'Tenor',
+                      value: financing.tenor.toString() + ' bulan',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Text(
+                    financing.isPaid ? 'Pelunasan' : 'Progres pembayaran',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF68736E),
+                        ),
+                  ),
+                  const Spacer(),
+                  Flexible(
+                    child: Text(
+                      financing.isPaid
+                          ? 'Lunas'
+                          : 'Sisa ' + formatCurrency(remaining),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF27322E),
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: LinearProgressIndicator(
+                  value: financing.isPaid ? 1 : progress,
+                  minHeight: 7,
+                  backgroundColor: const Color(0xFFE4ECE8),
+                  color: const Color(0xFF087F5B),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    'Lihat detail',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF087F5B),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(width: 2),
+                  const Icon(
+                    Icons.chevron_right,
+                    size: 18,
+                    color: Color(0xFF087F5B),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CardMetric extends StatelessWidget {
+  const _CardMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF68736E),
+                ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ],
+      );
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.isPaid});
+
+  final bool isPaid;
+
+  @override
+  Widget build(BuildContext context) {
+    final background =
+        isPaid ? const Color(0xFFE5F7ED) : const Color(0xFFFFF4D9);
+    final foreground =
+        isPaid ? const Color(0xFF087F5B) : const Color(0xFF8A5A00);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        isPaid ? 'Lunas' : 'Aktif',
+        style: TextStyle(
+          color: foreground,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
 class _FinancingEmptyState extends StatelessWidget {
-  const _FinancingEmptyState();
+  const _FinancingEmptyState({required this.hasFinancings});
+
+  final bool hasFinancings;
+
   @override
   Widget build(BuildContext context) => Card(
-      child: Padding(
+        child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-          child: Column(children: [
-            Container(
+          child: Column(
+            children: [
+              Container(
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                    color: const Color(0xFFEAF5F0),
-                    borderRadius: BorderRadius.circular(20)),
-                child: const Icon(Icons.account_balance_wallet_outlined,
-                    size: 32, color: Color(0xFF087F5B))),
-            const SizedBox(height: 16),
-            const Text('Belum ada pembiayaan',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            const SizedBox(height: 6),
-            const Text(
-                'Pembiayaan baru hanya dapat dibuat dari pesanan yang sudah berstatus Siap akad.',
-                textAlign: TextAlign.center)
-          ])));
+                  color: const Color(0xFFEAF5F0),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 32,
+                  color: Color(0xFF087F5B),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                hasFinancings
+                    ? 'Pembiayaan tidak ditemukan'
+                    : 'Belum ada pembiayaan',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                hasFinancings
+                    ? 'Coba ubah kata pencarian atau filter status.'
+                    : 'Pembiayaan baru dibuat dari pesanan yang sudah berstatus Siap akad.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF68736E),
+                    ),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class _FinancingDetailSheet extends StatelessWidget {
+  const _FinancingDetailSheet({required this.financing});
+
+  final Financing financing;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .82,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Detail Pembiayaan',
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          financing.number,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: const Color(0xFF68736E),
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _StatusBadge(isPaid: financing.isPaid),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0F6F3),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      financing.customerName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      financing.itemName,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF68736E),
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              _DetailRow(
+                label: 'Harga barang',
+                value: formatCurrency(financing.itemPrice),
+              ),
+              _DetailRow(
+                label: 'Uang muka / DP',
+                value: formatCurrency(financing.downPayment),
+              ),
+              _DetailRow(
+                label: 'Margin',
+                value: formatCurrency(financing.margin),
+              ),
+              _DetailRow(
+                label: 'Harga jual',
+                value: formatCurrency(financing.calculation.salePrice),
+              ),
+              _DetailRow(
+                label: 'Angsuran per bulan',
+                value: formatCurrency(financing.calculation.installment),
+              ),
+              _DetailRow(
+                label: 'Tenor',
+                value: financing.tenor.toString() + ' bulan',
+              ),
+              _DetailRow(
+                label: 'Sisa tagihan',
+                value: formatCurrency(financing.outstanding),
+                emphasize: true,
+              ),
+              _DetailRow(
+                label: 'Tanggal akad',
+                value: formatDate(financing.startDate),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Tutup'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.label,
+    required this.value,
+    this.emphasize = false,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF68736E),
+                    ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Flexible(
+              child: Text(
+                value,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: emphasize ? const Color(0xFF087F5B) : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
 }
 
 class _FinancingFormSheet extends StatefulWidget {
@@ -253,7 +730,9 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
           break;
         }
       }
-      _customerDisplay.text = '';
+      _customerDisplay.text = _selectedCustomer == null
+          ? order.customerName
+          : _selectedCustomer!.name + ' • ' + _selectedCustomer!.phone;
       _item.text = order.itemName;
       _price.text = (order.purchasePrice ?? order.estimatedPrice).toString();
       _dp.text = order.commitmentAmount.toString();
@@ -443,23 +922,60 @@ class _MoneyFormatter extends TextInputFormatter {
 }
 
 class _MiniStat extends StatelessWidget {
-  const _MiniStat(
-      {required this.label, required this.value, required this.icon});
-  final String label, value;
+  const _MiniStat({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
   final IconData icon;
+
   @override
   Widget build(BuildContext context) => Card(
-      color: const Color(0xFFF0F6F3),
-      child: Padding(
+        color: const Color(0xFFF0F6F3),
+        child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Row(children: [
-            Icon(icon, size: 20, color: const Color(0xFF087F5B)),
-            const SizedBox(width: 10),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
-              Text(label, style: Theme.of(context).textTheme.bodySmall)
-            ])
-          ])));
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDDF1E8),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  size: 19,
+                  color: const Color(0xFF087F5B),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF68736E),
+                    ),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 class _CustomerPickerSheet extends StatefulWidget {

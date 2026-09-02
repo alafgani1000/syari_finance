@@ -19,8 +19,15 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = _repository.load());
-    await _future;
+    final future = _repository.load();
+    setState(() {
+      _future = future;
+    });
+    try {
+      await future;
+    } catch (_) {
+      // FutureBuilder menampilkan tombol coba lagi tanpa error global.
+    }
   }
 
   @override

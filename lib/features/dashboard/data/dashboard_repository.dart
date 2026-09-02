@@ -1,3 +1,5 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../../../core/database/app_database.dart';
 
 class DashboardData {
@@ -42,6 +44,23 @@ class DashboardRepository {
   final AppDatabase _database;
 
   Future<DashboardData> load() async {
+    DatabaseException? lastClosedError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await _load();
+      } on DatabaseException catch (error) {
+        if (!error.toString().contains('database_closed')) rethrow;
+        lastClosedError = error;
+        await _database.waitUntilReady();
+        if (attempt < 2) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+        }
+      }
+    }
+    throw lastClosedError!;
+  }
+
+  Future<DashboardData> _load() async {
     final db = await _database.database;
     final today = DateTime.now();
     final start =

@@ -12,8 +12,15 @@ class FinancingRepository {
 
   Future<List<Financing>> getAll() async {
     final db = await _database.database;
-    final rows = await db.rawQuery(
-        'SELECT f.*, c.name AS customer_name FROM financings f JOIN customers c ON c.id = f.customer_id ORDER BY f.created_at DESC');
+    final rows = await db.rawQuery('''
+      SELECT f.*, c.name AS customer_name,
+        COALESCE(SUM(i.amount - i.paid_amount), 0) AS remaining_amount
+      FROM financings f
+      JOIN customers c ON c.id = f.customer_id
+      LEFT JOIN installments i ON i.financing_id = f.id
+      GROUP BY f.id
+      ORDER BY f.created_at DESC
+    ''');
     return rows.map(_fromRow).toList();
   }
 
@@ -41,23 +48,25 @@ class FinancingRepository {
         'first_due_date': firstDueDate.toIso8601String(),
         'status': 'Aktif',
         'created_at': now,
-        'updated_at': now
+        'updated_at': now,
       });
       if (financing.orderId != null) {
         await txn.update(
-            'orders',
-            {
-              'status': 'Akad aktif',
-              'commitment_status': 'Dikonversi',
-              'updated_at': now,
-            },
-            where: 'id = ?',
-            whereArgs: [financing.orderId]);
+          'orders',
+          {
+            'status': 'Akad aktif',
+            'commitment_status': 'Dikonversi',
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [financing.orderId],
+        );
       }
       final schedules = InstallmentGenerator().generate(
-          startDate: financing.startDate,
-          tenor: financing.tenor,
-          totalAmount: financing.calculation.salePrice);
+        startDate: financing.startDate,
+        tenor: financing.tenor,
+        totalAmount: financing.calculation.salePrice,
+      );
       for (final schedule in schedules) {
         await txn.insert('installments', {
           'id': _uuid.v4(),
@@ -68,25 +77,29 @@ class FinancingRepository {
           'paid_amount': 0,
           'status': 'Belum Bayar',
           'created_at': now,
-          'updated_at': now
+          'updated_at': now,
         });
       }
     });
   }
 
   Financing _fromRow(Map<String, Object?> row) => Financing(
-      number: row['financing_number']! as String,
-      orderId: row['order_id'] as String?,
-      customerId: row['customer_id']! as String,
-      customerName: row['customer_name']! as String,
-      itemName: row['item_name']! as String,
-      calculation: FinancingCalculation(
+        number: row['financing_number']! as String,
+        orderId: row['order_id'] as String?,
+        customerId: row['customer_id']! as String,
+        customerName: row['customer_name']! as String,
+        itemName: row['item_name']! as String,
+        calculation: FinancingCalculation(
           principal: row['principal']! as int,
           salePrice: row['sale_price']! as int,
-          installment: row['monthly_installment']! as int),
-      itemPrice: row['item_price']! as int,
-      downPayment: row['down_payment']! as int,
-      margin: row['margin']! as int,
-      tenor: row['tenor']! as int,
-      startDate: DateTime.parse(row['start_date']! as String));
+          installment: row['monthly_installment']! as int,
+        ),
+        itemPrice: row['item_price']! as int,
+        downPayment: row['down_payment']! as int,
+        margin: row['margin']! as int,
+        tenor: row['tenor']! as int,
+        startDate: DateTime.parse(row['start_date']! as String),
+        status: row['status']! as String,
+        remainingAmount: row['remaining_amount']! as int,
+      );
 }
