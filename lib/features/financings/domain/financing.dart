@@ -3,6 +3,7 @@ import 'package:syari_finance/features/financings/domain/murabahah_calculator.da
 class Financing {
   Financing(
       {required this.number,
+      this.orderId,
       required this.customerId,
       required this.customerName,
       required this.itemName,
@@ -13,6 +14,7 @@ class Financing {
       required this.tenor,
       required this.startDate});
   final String number;
+  final String? orderId;
   final String customerId;
   final String customerName;
   final String itemName;

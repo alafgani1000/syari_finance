@@ -10,7 +10,7 @@ class AppDatabase {
   static final instance = AppDatabase._();
 
   static const databaseName = 'syari_finance.db';
-  static const schemaVersion = 1;
+  static const schemaVersion = 3;
 
   Database? _database;
 
@@ -24,7 +24,7 @@ class AppDatabase {
             address TEXT, occupation TEXT, income INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''');
           await db.execute('''CREATE TABLE financings (
-            id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, financing_number TEXT NOT NULL UNIQUE,
+            id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, order_id TEXT, financing_number TEXT NOT NULL UNIQUE,
             item_name TEXT NOT NULL, item_price INTEGER NOT NULL, down_payment INTEGER NOT NULL,
             principal INTEGER NOT NULL, margin INTEGER NOT NULL, sale_price INTEGER NOT NULL,
             tenor INTEGER NOT NULL, monthly_installment INTEGER NOT NULL, start_date TEXT NOT NULL,
@@ -41,11 +41,38 @@ class AppDatabase {
             payment_method TEXT NOT NULL, notes TEXT, status TEXT NOT NULL DEFAULT 'posted', created_at TEXT NOT NULL,
             FOREIGN KEY(customer_id) REFERENCES customers(id), FOREIGN KEY(financing_id) REFERENCES financings(id),
             FOREIGN KEY(installment_id) REFERENCES installments(id))''');
+          await _createOrderTables(db);
           await db.execute(
             '''CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)''',
           );
         },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await _createOrderTables(db);
+          }
+          if (oldVersion < 3) {
+            await db.execute('ALTER TABLE financings ADD COLUMN order_id TEXT');
+          }
+        },
       );
+
+  Future<void> _createOrderTables(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE orders (
+      id TEXT PRIMARY KEY, order_number TEXT NOT NULL UNIQUE,
+      customer_id TEXT NOT NULL, item_name TEXT NOT NULL,
+      estimated_price INTEGER NOT NULL, supplier_name TEXT,
+      commitment_amount INTEGER NOT NULL DEFAULT 0,
+      commitment_received_at TEXT, commitment_status TEXT NOT NULL DEFAULT 'Belum diterima',
+      purchase_price INTEGER, purchased_at TEXT, ownership_confirmed_at TEXT,
+      status TEXT NOT NULL DEFAULT 'Pemesanan', notes TEXT,
+      cancellation_reason TEXT, actual_loss INTEGER NOT NULL DEFAULT 0,
+      refund_amount INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(customer_id) REFERENCES customers(id))''');
+    await db.execute(
+      'CREATE INDEX idx_orders_customer_status ON orders(customer_id, status)',
+    );
+  }
 
   Future<String> get databasePath async =>
       join(await getDatabasesPath(), databaseName);

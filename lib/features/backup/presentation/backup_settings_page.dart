@@ -42,32 +42,36 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
     final destination = await _chooseBackupDestination();
     if (destination == null || !mounted) return;
 
+    BackupExport? export;
     setState(() => _busy = true);
     try {
-      final export =
-          await _repository.createEncryptedBackup(password: password);
-      final saved = await BackupFileChannel.saveBackup(
+      export = await _repository.createEncryptedBackup(password: password);
+      final savedLocation = await BackupFileChannel.saveBackup(
         export.file,
         destination: destination,
       );
-      if (!saved) {
+      if (savedLocation == null) {
         _showMessage('Penyimpanan dibatalkan. Cadangan tidak disimpan.');
       } else {
         await _repository.recordBackup(export.createdAt);
         if (mounted) {
-          setState(() => _lastBackupAt = export.createdAt);
+          setState(() => _lastBackupAt = export!.createdAt);
         }
         _showMessage(
-            'Backup berhasil disimpan. Simpan berkas ini di Google Drive atau tempat yang aman.');
-      }
-      if (await export.file.exists()) {
-        await export.file.delete();
+          destination == BackupDestination.googleDrive
+              ? 'Backup berhasil dikirim ke Google Drive.'
+              : 'Backup berhasil disimpan di perangkat.',
+        );
       }
     } on BackupException catch (error) {
       _showMessage(error.message, error: true);
-    } catch (_) {
-      _showMessage('Backup gagal. Silakan coba lagi.', error: true);
+    } catch (error) {
+      _showMessage('Backup gagal: $error', error: true);
     } finally {
+      final temporaryFile = export?.file;
+      if (temporaryFile != null && await temporaryFile.exists()) {
+        await temporaryFile.delete();
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -76,23 +80,30 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
       showModalBottomSheet<BackupDestination>(
         context: context,
         showDragHandle: true,
+        isScrollControlled: true,
         builder: (sheetContext) => SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Simpan backup ke',
-                    style: Theme.of(sheetContext).textTheme.titleLarge),
+                Text(
+                  'Simpan backup ke',
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 6),
-                Text('Pilih lokasi penyimpanan cadangan Anda.',
-                    style: Theme.of(sheetContext).textTheme.bodySmall),
+                Text(
+                  'Android akan membuka pemilih lokasi penyimpanan.',
+                  style: Theme.of(sheetContext).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 12),
                 ListTile(
                   leading: const Icon(Icons.cloud_outlined),
                   title: const Text('Google Drive'),
-                  subtitle: const Text('Direkomendasikan untuk perangkat baru'),
+                  subtitle: const Text(
+                    'Pilih Google Drive pada pemilih Android berikutnya',
+                  ),
                   onTap: () => Navigator.pop(
                     sheetContext,
                     BackupDestination.googleDrive,
@@ -140,8 +151,10 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
         file: backupFile,
         password: password,
       );
-      _showMessage('Data berhasil dipulihkan. Dashboard akan dimuat ulang.');
-      if (mounted) context.go('/dashboard');
+      if (!mounted) return;
+      context.go(
+        '/dashboard?reload=${DateTime.now().microsecondsSinceEpoch}',
+      );
     } on BackupException catch (error) {
       _showMessage(error.message, error: true);
     } catch (_) {

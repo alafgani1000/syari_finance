@@ -199,55 +199,103 @@ class _FinancingPaymentGroup extends StatelessWidget {
   const _FinancingPaymentGroup({required this.items, required this.onPay});
   final List<Installment> items;
   final ValueChanged<Installment> onPay;
+
   @override
   Widget build(BuildContext context) {
     final first = items.first;
     final total = items.fold(0, (sum, item) => sum + item.remaining);
     return Card(
-        margin: const EdgeInsets.only(bottom: 12),
-        clipBehavior: Clip.antiAlias,
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          leading: CircleAvatar(
-              backgroundColor: const Color(0xFFD9F5E9),
-              child: Text(first.customerName.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(
-                      color: Color(0xFF087F5B), fontWeight: FontWeight.w800))),
-          title: Text(first.customerName,
-              style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(
-              '${first.financingNumber} • ${items.length} angsuran terbuka'),
-          trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(formatCurrency(total),
-                    style: const TextStyle(fontWeight: FontWeight.w800)),
-                const Text('Sisa tagihan', style: TextStyle(fontSize: 11))
-              ]),
-          children: items
-              .map((item) => Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Container(
-                      decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAF9),
-                          borderRadius: BorderRadius.circular(12)),
-                      child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          title: Text('Angsuran #${item.number}',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle:
-                              Text('Jatuh tempo ${formatDate(item.dueDate)}'),
-                          trailing: SizedBox(
-                              width: 110,
-                              child: FilledButton.tonal(
-                                  onPressed: () => onPay(item),
-                                  child: Text(formatCurrency(item.remaining)))),
-                          leading: _StatusChip(status: item.status)))))
-              .toList(),
-        ));
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: CircleAvatar(
+          backgroundColor: const Color(0xFFD9F5E9),
+          child: Text(
+            first.customerName.substring(0, 1).toUpperCase(),
+            style: const TextStyle(
+              color: Color(0xFF087F5B),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        title: Text(first.customerName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800)),
+        subtitle: Text(
+          '${first.financingNumber} • ${items.length} angsuran terbuka',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: SizedBox(
+          width: 98,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(formatCurrency(total),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              const Text('Sisa tagihan', style: TextStyle(fontSize: 11)),
+            ],
+          ),
+        ),
+        children: items
+            .map(
+              (item) => Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAF9),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text('Angsuran #${item.number}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                            _StatusChip(status: item.status),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text('Jatuh tempo ${formatDate(item.dueDate)}',
+                            style: Theme.of(context).textTheme.bodySmall),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Expanded(child: Text('Sisa tagihan')),
+                            Text(formatCurrency(item.remaining),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w800)),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => onPay(item),
+                            icon: const Icon(Icons.payments_outlined),
+                            label: const Text('Catat pembayaran'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
   }
 }
 

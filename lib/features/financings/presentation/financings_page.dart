@@ -5,9 +5,12 @@ import '../domain/murabahah_calculator.dart';
 import '../../../core/utils/formatters.dart';
 import '../data/financing_repository.dart';
 import '../../customers/data/customer_repository.dart';
+import '../../orders/data/order_repository.dart';
+import '../../orders/domain/order.dart';
 
 class FinancingsPage extends StatefulWidget {
-  const FinancingsPage({super.key});
+  const FinancingsPage({this.orderId, super.key});
+  final String? orderId;
   @override
   State<FinancingsPage> createState() => _FinancingsPageState();
 }
@@ -16,6 +19,7 @@ class _FinancingsPageState extends State<FinancingsPage> {
   final _financings = <Financing>[];
   final _repository = FinancingRepository();
   final _customerRepository = CustomerRepository();
+  final _orderRepository = OrderRepository();
   bool _loading = true;
   String _filter = 'all';
   String _query = '';
@@ -26,6 +30,10 @@ class _FinancingsPageState extends State<FinancingsPage> {
   void initState() {
     super.initState();
     _loadFinancings();
+    if (widget.orderId != null) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _openOrder(widget.orderId!));
+    }
   }
 
   Future<void> _loadFinancings() async {
@@ -44,7 +52,19 @@ class _FinancingsPageState extends State<FinancingsPage> {
     }
   }
 
-  Future<void> _showFinancingForm() async {
+  Future<void> _openOrder(String orderId) async {
+    final order = await _orderRepository.getById(orderId);
+    if (!mounted || order == null) return;
+    if (!order.isReadyForContract) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pesanan belum siap untuk akad')),
+      );
+      return;
+    }
+    await _showFinancingForm(order);
+  }
+
+  Future<void> _showFinancingForm([Order? order]) async {
     final customers = await _customerRepository.getChoices();
     if (!mounted) return;
     if (customers.isEmpty) {
@@ -59,7 +79,8 @@ class _FinancingsPageState extends State<FinancingsPage> {
         builder: (_) => _FinancingFormSheet(
             number:
                 'MRB-${DateTime.now().year}-${_sequence.toString().padLeft(6, '0')}',
-            customers: customers));
+            customers: customers,
+            order: order));
     if (!mounted || result == null) return;
     try {
       await _repository.save(result);
@@ -169,10 +190,6 @@ class _FinancingsPageState extends State<FinancingsPage> {
                           trailing: const Chip(label: Text('Aktif'))))),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-          onPressed: _showFinancingForm,
-          icon: const Icon(Icons.add),
-          label: const Text('Tambah')),
     );
   }
 }
@@ -197,15 +214,17 @@ class _FinancingEmptyState extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const SizedBox(height: 6),
             const Text(
-                'Buat pembiayaan Murabahah baru untuk mulai mencatat angsuran.',
+                'Pembiayaan baru hanya dapat dibuat dari pesanan yang sudah berstatus Siap akad.',
                 textAlign: TextAlign.center)
           ])));
 }
 
 class _FinancingFormSheet extends StatefulWidget {
-  const _FinancingFormSheet({required this.number, required this.customers});
+  const _FinancingFormSheet(
+      {required this.number, required this.customers, this.order});
   final String number;
   final List<CustomerChoice> customers;
+  final Order? order;
   @override
   State<_FinancingFormSheet> createState() => _FinancingFormSheetState();
 }
@@ -226,6 +245,20 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
   void initState() {
     super.initState();
     for (final c in [_price, _dp, _margin, _tenor]) c.addListener(_calculate);
+    final order = widget.order;
+    if (order != null) {
+      for (final customer in widget.customers) {
+        if (customer.id == order.customerId) {
+          _selectedCustomer = customer;
+          break;
+        }
+      }
+      _customerDisplay.text = '';
+      _item.text = order.itemName;
+      _price.text = (order.purchasePrice ?? order.estimatedPrice).toString();
+      _dp.text = order.commitmentAmount.toString();
+      _calculate();
+    }
   }
 
   @override
@@ -272,6 +305,7 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                     controller: _customerDisplay,
                     readOnly: true,
                     onTap: () async {
+                      if (widget.order != null) return;
                       final selected =
                           await showModalBottomSheet<CustomerChoice>(
                               context: context,
@@ -353,6 +387,7 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                                 context,
                                 Financing(
                                     number: widget.number,
+                                    orderId: widget.order?.id,
                                     customerId: _selectedCustomer!.id,
                                     customerName: _selectedCustomer!.name,
                                     itemName: _item.text.trim(),

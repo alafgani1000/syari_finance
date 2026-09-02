@@ -9,7 +9,7 @@ class BackupFileChannel {
 
   static const _channel = MethodChannel('syari_finance/backup_files');
 
-  static Future<bool> saveBackup(
+  static Future<String?> saveBackup(
     File file, {
     required BackupDestination destination,
   }) async {
@@ -18,14 +18,10 @@ class BackupFileChannel {
       <String, String>{
         'sourcePath': file.path,
         'fileName': file.uri.pathSegments.last,
-        'providerPackage': switch (destination) {
-          BackupDestination.googleDrive => 'com.google.android.apps.docs',
-          BackupDestination.device => 'com.google.android.documentsui',
-          BackupDestination.other => '',
-        },
+        'destination': destination.name,
       },
     );
-    return savedLocation != null;
+    return savedLocation;
   }
 
   static Future<File?> pickBackup() async {

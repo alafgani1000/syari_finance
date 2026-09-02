@@ -23,11 +23,11 @@ class FinancingRepository {
     await db.transaction((txn) async {
       final customerId = financing.customerId;
       final financingId = _uuid.v4();
-      final firstDueDate = DateTime(financing.startDate.year,
-          financing.startDate.month + 1, financing.startDate.day);
+      final firstDueDate = addMonthsClamped(financing.startDate, 1);
       await txn.insert('financings', {
         'id': financingId,
         'customer_id': customerId,
+        'order_id': financing.orderId,
         'financing_number': financing.number,
         'item_name': financing.itemName,
         'item_price': financing.itemPrice,
@@ -43,8 +43,19 @@ class FinancingRepository {
         'created_at': now,
         'updated_at': now
       });
+      if (financing.orderId != null) {
+        await txn.update(
+            'orders',
+            {
+              'status': 'Akad aktif',
+              'commitment_status': 'Dikonversi',
+              'updated_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [financing.orderId]);
+      }
       final schedules = InstallmentGenerator().generate(
-          firstDueDate: firstDueDate,
+          startDate: financing.startDate,
           tenor: financing.tenor,
           totalAmount: financing.calculation.salePrice);
       for (final schedule in schedules) {
@@ -65,6 +76,7 @@ class FinancingRepository {
 
   Financing _fromRow(Map<String, Object?> row) => Financing(
       number: row['financing_number']! as String,
+      orderId: row['order_id'] as String?,
       customerId: row['customer_id']! as String,
       customerName: row['customer_name']! as String,
       itemName: row['item_name']! as String,

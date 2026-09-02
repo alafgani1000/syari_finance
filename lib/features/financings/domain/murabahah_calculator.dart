@@ -14,11 +14,12 @@ class MurabahahCalculator {
       required int downPayment,
       required int margin,
       required int tenor}) {
-    if (itemPrice < 0 ||
+    if (itemPrice <= 0 ||
         downPayment < 0 ||
         margin < 0 ||
         tenor <= 0 ||
-        downPayment > itemPrice) {
+        downPayment > itemPrice ||
+        itemPrice - downPayment + margin <= 0) {
       throw ArgumentError('Nilai pembiayaan tidak valid');
     }
     final principal = itemPrice - downPayment;

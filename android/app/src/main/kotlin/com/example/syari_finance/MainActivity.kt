@@ -2,7 +2,6 @@ package com.example.syari_finance
 
 import android.app.Activity
 import android.content.Intent
-import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,6 +14,7 @@ class MainActivity : FlutterActivity() {
 
     private var pendingResult: MethodChannel.Result? = null
     private var pendingSource: File? = null
+    private var pendingDestination: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -24,7 +24,7 @@ class MainActivity : FlutterActivity() {
                     "saveBackup" -> saveBackup(
                         sourcePath = call.argument<String>("sourcePath"),
                         fileName = call.argument<String>("fileName"),
-                        providerPackage = call.argument<String>("providerPackage"),
+                        destination = call.argument<String>("destination"),
                         result = result,
                     )
                     "pickBackup" -> pickBackup(result)
@@ -33,7 +33,12 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    private fun saveBackup(sourcePath: String?, fileName: String?, providerPackage: String?, result: MethodChannel.Result) {
+    private fun saveBackup(
+        sourcePath: String?,
+        fileName: String?,
+        destination: String?,
+        result: MethodChannel.Result,
+    ) {
         if (pendingResult != null) {
             result.error("busy", "Ada pemilih berkas yang masih terbuka.", null)
             return
@@ -45,14 +50,11 @@ class MainActivity : FlutterActivity() {
         }
         pendingResult = result
         pendingSource = source
+        pendingDestination = destination
         val saveIntent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/octet-stream"
             putExtra(Intent.EXTRA_TITLE, fileName ?: source.name)
-        }
-        if (!providerPackage.isNullOrBlank() &&
-            packageManager.resolveActivity(saveIntent.setPackage(providerPackage), 0) == null) {
-            saveIntent.setPackage(null)
         }
         startActivityForResult(saveIntent, saveRequestCode)
     }
@@ -98,6 +100,15 @@ class MainActivity : FlutterActivity() {
             finishError("internal_error", "Berkas backup sementara tidak ditemukan.")
             return
         }
+        if (pendingDestination == "googleDrive" &&
+            uri.authority != "com.google.android.apps.docs.storage"
+        ) {
+            finishError(
+                "wrong_destination",
+                "Google Drive belum dipilih. Pada pemilih Android, pilih Google Drive lalu tentukan foldernya.",
+            )
+            return
+        }
         Thread {
             try {
                 source.inputStream().use { input ->
@@ -134,6 +145,7 @@ class MainActivity : FlutterActivity() {
         val result = pendingResult
         pendingResult = null
         pendingSource = null
+        pendingDestination = null
         result?.success(value)
     }
 
@@ -141,6 +153,7 @@ class MainActivity : FlutterActivity() {
         val result = pendingResult
         pendingResult = null
         pendingSource = null
+        pendingDestination = null
         result?.error(code, message, null)
     }
 }

@@ -8,6 +8,7 @@ import 'features/customers/presentation/customers_page.dart';
 import 'features/financings/presentation/financings_page.dart';
 import 'features/payments/presentation/payments_page.dart';
 import 'features/backup/presentation/backup_settings_page.dart';
+import 'features/orders/presentation/orders_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) => GoRouter(
       initialLocation: '/dashboard',
@@ -17,13 +18,20 @@ final routerProvider = Provider<GoRouter>((ref) => GoRouter(
             routes: [
               GoRoute(
                   path: '/dashboard',
-                  builder: (_, __) => const DashboardPage()),
+                  builder: (_, state) => DashboardPage(
+                        key: ValueKey(
+                          state.uri.queryParameters['reload'] ?? 'default',
+                        ),
+                      )),
               GoRoute(
                   path: '/customers',
                   builder: (_, __) => const CustomersPage()),
               GoRoute(
                   path: '/financings',
-                  builder: (_, __) => const FinancingsPage()),
+                  builder: (_, state) => FinancingsPage(
+                        orderId: state.uri.queryParameters['orderId'],
+                      )),
+              GoRoute(path: '/orders', builder: (_, __) => const OrdersPage()),
               GoRoute(
                   path: '/payments', builder: (_, __) => const PaymentsPage()),
               GoRoute(
@@ -78,6 +86,11 @@ class AppShell extends StatelessWidget {
                   .titleLarge
                   ?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.2)),
           actions: [
+            IconButton(
+              tooltip: 'Pemesanan',
+              onPressed: () => context.push('/orders'),
+              icon: const Icon(Icons.shopping_bag_outlined),
+            ),
             IconButton(
               tooltip: 'Data dan backup',
               onPressed: () => context.push('/settings'),
