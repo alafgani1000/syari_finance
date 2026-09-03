@@ -7,7 +7,7 @@ void main() {
       final schedules = InstallmentGenerator().generate(
         startDate: DateTime(2026, 1, 31),
         tenor: 3,
-        totalAmount: 100,
+        totalAmount: 120000,
       );
 
       expect(schedules.map((item) => item.dueDate), [
@@ -17,18 +17,17 @@ void main() {
       ]);
     });
 
-    test('nominal reguler konsisten dan angsuran terakhir menutup pembulatan',
-        () {
+    test('meletakkan selisih pembulatan di angsuran terakhir', () {
       final schedules = InstallmentGenerator().generate(
         startDate: DateTime(2026, 1, 1),
         tenor: 3,
-        totalAmount: 100,
+        totalAmount: 100000,
       );
 
-      expect(schedules.map((item) => item.amount), [34, 34, 32]);
+      expect(schedules.map((item) => item.amount), [33000, 33000, 34000]);
       expect(
         schedules.fold<int>(0, (total, item) => total + item.amount),
-        100,
+        100000,
       );
     });
 

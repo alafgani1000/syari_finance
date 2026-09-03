@@ -4,19 +4,48 @@ import 'package:syari_finance/features/financings/domain/murabahah_calculator.da
 void main() {
   test('menghitung murabahah sesuai contoh bisnis', () {
     final result = MurabahahCalculator().calculate(
-        itemPrice: 10000000, downPayment: 2000000, margin: 2000000, tenor: 10);
+      itemPrice: 10000000,
+      downPayment: 2000000,
+      margin: 2000000,
+      tenor: 10,
+    );
     expect(result.principal, 8000000);
     expect(result.salePrice, 10000000);
     expect(result.installment, 1000000);
+    expect(result.finalInstallment, 1000000);
   });
+
   test('menolak tenor tidak valid dan DP melebihi harga', () {
     expect(
-        () => MurabahahCalculator()
-            .calculate(itemPrice: 1, downPayment: 0, margin: 0, tenor: 0),
-        throwsArgumentError);
+      () => MurabahahCalculator().calculate(
+        itemPrice: 1,
+        downPayment: 0,
+        margin: 0,
+        tenor: 0,
+      ),
+      throwsArgumentError,
+    );
     expect(
-        () => MurabahahCalculator()
-            .calculate(itemPrice: 1, downPayment: 2, margin: 0, tenor: 1),
-        throwsArgumentError);
+      () => MurabahahCalculator().calculate(
+        itemPrice: 1,
+        downPayment: 2,
+        margin: 0,
+        tenor: 1,
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('menaruh penyesuaian pembulatan pada angsuran terakhir', () {
+    final result = MurabahahCalculator().calculate(
+      itemPrice: 10000000,
+      downPayment: 2000000,
+      margin: 1500000,
+      tenor: 12,
+    );
+    expect(result.salePrice, 9500000);
+    expect(result.installment, 791000);
+    expect(result.finalInstallment, 799000);
+    expect(result.hasFinalAdjustment, isTrue);
   });
 }

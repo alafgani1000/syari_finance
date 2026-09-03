@@ -32,10 +32,20 @@ class _FinancingsPageState extends State<FinancingsPage> {
   void initState() {
     super.initState();
     _loadFinancings();
-    if (widget.orderId != null) {
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _openOrder(widget.orderId!));
+    _openFinancingFormForOrder(widget.orderId);
+  }
+
+  @override
+  void didUpdateWidget(covariant FinancingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.orderId != oldWidget.orderId) {
+      _openFinancingFormForOrder(widget.orderId);
     }
+  }
+
+  void _openFinancingFormForOrder(String? orderId) {
+    if (orderId == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openOrder(orderId));
   }
 
   Future<void> _loadFinancings() async {
@@ -734,8 +744,10 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
           ? order.customerName
           : _selectedCustomer!.name + ' • ' + _selectedCustomer!.phone;
       _item.text = order.itemName;
-      _price.text = (order.purchasePrice ?? order.estimatedPrice).toString();
-      _dp.text = order.commitmentAmount.toString();
+      _price.text = _formatInputMoney(
+        order.purchasePrice ?? order.estimatedPrice,
+      );
+      _dp.text = _formatInputMoney(order.commitmentAmount);
       _calculate();
     }
   }
@@ -749,12 +761,19 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
 
   int _number(TextEditingController c) =>
       int.tryParse(c.text.replaceAll('.', '').replaceAll(',', '')) ?? 0;
+
+  String _formatInputMoney(int value) =>
+      formatCurrency(value).replaceFirst('Rp', '');
+
   void _calculate() {
     final price = _number(_price);
     final dp = _number(_dp);
     final margin = _number(_margin);
     final tenor = _number(_tenor);
-    if (price > 0 && tenor > 0 && dp <= price) {
+    if (price > 0 &&
+        tenor > 0 &&
+        dp <= price &&
+        [price, dp, margin].every((value) => value % 1000 == 0)) {
       final value = _calculator.calculate(
           itemPrice: price, downPayment: dp, margin: margin, tenor: tenor);
       if (mounted) setState(() => _calculation = value);
@@ -813,17 +832,24 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                         : null),
                 const SizedBox(height: 12),
                 _field(_price, 'Harga Barang', Icons.sell_outlined,
-                    money: true,
-                    hint: 'Contoh: 25.000.000',
-                    validator: (_) => _number(_price) <= 0
-                        ? 'Harga barang wajib diisi'
-                        : null),
+                    money: true, hint: 'Contoh: 25.000.000', validator: (_) {
+                  final value = _number(_price);
+                  if (value <= 0) return 'Harga barang wajib diisi';
+                  return value % 1000 == 0 ? null : 'Gunakan kelipatan Rp1.000';
+                }),
                 const SizedBox(height: 12),
                 _field(_dp, 'Uang Muka / DP', Icons.payments_outlined,
-                    money: true),
+                    money: true,
+                    validator: (_) => _number(_dp) % 1000 == 0
+                        ? null
+                        : 'DP harus kelipatan Rp1.000'),
                 const SizedBox(height: 12),
-                _field(_margin, 'Margin', Icons.trending_up_outlined,
-                    money: true),
+                _field(_margin, 'Margin keuntungan (Rp)',
+                    Icons.trending_up_outlined,
+                    money: true,
+                    validator: (_) => _number(_margin) % 1000 == 0
+                        ? null
+                        : 'Margin harus kelipatan Rp1.000'),
                 const SizedBox(height: 12),
                 _field(_tenor, 'Tenor (bulan)', Icons.calendar_month_outlined,
                     validator: (_) => _number(_tenor) <= 0
@@ -847,13 +873,23 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                                     value: formatCurrency(
                                         _calculation!.principal)),
                                 _SummaryRow(
+                                    label: 'Margin keuntungan',
+                                    value: formatCurrency(_number(_margin))),
+                                _SummaryRow(
                                     label: 'Harga jual',
                                     value: formatCurrency(
                                         _calculation!.salePrice)),
                                 _SummaryRow(
-                                    label: 'Angsuran / bulan',
+                                    label: _calculation!.hasFinalAdjustment
+                                        ? 'Angsuran reguler / bulan'
+                                        : 'Angsuran / bulan',
                                     value: formatCurrency(
-                                        _calculation!.installment))
+                                        _calculation!.installment)),
+                                if (_calculation!.hasFinalAdjustment)
+                                  _SummaryRow(
+                                      label: 'Angsuran bulan terakhir',
+                                      value: formatCurrency(
+                                          _calculation!.finalInstallment))
                               ]))),
                 const SizedBox(height: 18),
                 SizedBox(

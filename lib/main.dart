@@ -29,6 +29,9 @@ final routerProvider = Provider<GoRouter>((ref) => GoRouter(
               GoRoute(
                   path: '/financings',
                   builder: (_, state) => FinancingsPage(
+                        key: ValueKey(
+                          state.uri.queryParameters['orderId'] ?? 'financings',
+                        ),
                         orderId: state.uri.queryParameters['orderId'],
                       )),
               GoRoute(path: '/orders', builder: (_, __) => const OrdersPage()),

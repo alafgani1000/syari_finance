@@ -26,20 +26,19 @@ class InstallmentGenerator {
     required int tenor,
     required int totalAmount,
   }) {
-    if (tenor <= 0 || totalAmount <= 0 || totalAmount < tenor) {
+    if (tenor <= 0 || totalAmount <= 0 || totalAmount < tenor * 1000) {
       throw ArgumentError('Jadwal angsuran tidak valid');
     }
 
-    final regularAmount = (totalAmount / tenor).ceil();
-    return List.generate(tenor, (index) {
-      final isLast = index == tenor - 1;
-      final amount =
-          isLast ? totalAmount - (regularAmount * (tenor - 1)) : regularAmount;
-      return GeneratedInstallment(
+    final regularAmount = ((totalAmount ~/ tenor) ~/ 1000) * 1000;
+    final finalAmount = totalAmount - (regularAmount * (tenor - 1));
+    return List.generate(
+      tenor,
+      (index) => GeneratedInstallment(
         number: index + 1,
         dueDate: addMonthsClamped(startDate, index + 1),
-        amount: amount,
-      );
-    });
+        amount: index == tenor - 1 ? finalAmount : regularAmount,
+      ),
+    );
   }
 }

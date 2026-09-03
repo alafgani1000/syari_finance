@@ -93,6 +93,9 @@ class FinancingRepository {
           principal: row['principal']! as int,
           salePrice: row['sale_price']! as int,
           installment: row['monthly_installment']! as int,
+          finalInstallment: (row['sale_price']! as int) -
+              ((row['monthly_installment']! as int) *
+                  ((row['tenor']! as int) - 1)),
         ),
         itemPrice: row['item_price']! as int,
         downPayment: row['down_payment']! as int,
