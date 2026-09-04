@@ -11,7 +11,7 @@ class AppDatabase {
   static final instance = AppDatabase._();
 
   static const databaseName = 'syari_finance.db';
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
 
   Database? _database;
   Completer<void>? _restoreCompleter;
@@ -70,10 +70,12 @@ class AppDatabase {
           await db.execute('''CREATE TABLE payments (
             id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, financing_id TEXT NOT NULL,
             installment_id TEXT NOT NULL, payment_date TEXT NOT NULL, amount INTEGER NOT NULL,
-            payment_method TEXT NOT NULL, notes TEXT, status TEXT NOT NULL DEFAULT 'posted', created_at TEXT NOT NULL,
+            payment_method TEXT NOT NULL, notes TEXT, status TEXT NOT NULL DEFAULT 'posted',
+            voided_at TEXT, voided_by TEXT, void_reason TEXT, reversal_of TEXT, created_at TEXT NOT NULL,
             FOREIGN KEY(customer_id) REFERENCES customers(id), FOREIGN KEY(financing_id) REFERENCES financings(id),
             FOREIGN KEY(installment_id) REFERENCES installments(id))''');
           await _createOrderTables(db);
+          await _createPaymentIndexes(db);
           await db.execute(
             '''CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)''',
           );
@@ -85,8 +87,26 @@ class AppDatabase {
           if (oldVersion < 3) {
             await db.execute('ALTER TABLE financings ADD COLUMN order_id TEXT');
           }
+          if (oldVersion < 4) {
+            await db.execute('ALTER TABLE payments ADD COLUMN voided_at TEXT');
+            await db.execute('ALTER TABLE payments ADD COLUMN voided_by TEXT');
+            await db
+                .execute('ALTER TABLE payments ADD COLUMN void_reason TEXT');
+            await db
+                .execute('ALTER TABLE payments ADD COLUMN reversal_of TEXT');
+            await _createPaymentIndexes(db);
+          }
         },
       );
+
+  Future<void> _createPaymentIndexes(DatabaseExecutor db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_payments_history ON payments(created_at DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_payments_installment ON payments(installment_id)',
+    );
+  }
 
   Future<void> _createOrderTables(DatabaseExecutor db) async {
     await db.execute('''CREATE TABLE orders (

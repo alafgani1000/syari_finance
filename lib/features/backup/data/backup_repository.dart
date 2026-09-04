@@ -123,9 +123,11 @@ class BackupRepository {
       final manifest = jsonDecode(
         utf8.decode(manifestFile.content as List<int>),
       ) as Map<String, dynamic>;
-      if (manifest['schemaVersion'] != AppDatabase.schemaVersion) {
+      final backupSchemaVersion = manifest['schemaVersion'];
+      if (backupSchemaVersion is! int ||
+          backupSchemaVersion > AppDatabase.schemaVersion) {
         throw BackupException(
-          'Versi database cadangan tidak cocok dengan aplikasi ini.',
+          'Cadangan dibuat oleh versi aplikasi yang lebih baru.',
         );
       }
 

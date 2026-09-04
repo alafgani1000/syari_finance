@@ -15,6 +15,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
   final _installments = InstallmentRepository();
   final _payments = PaymentRepository();
   List<Installment> _open = [];
+  List<PaymentRecord> _history = [];
   bool _loading = true;
   final _searchController = TextEditingController();
   String _query = '';
@@ -27,12 +28,18 @@ class _PaymentsPageState extends State<PaymentsPage> {
   }
 
   Future<void> _load() async {
-    final items = await _installments.getOpenInstallments();
-    if (mounted)
+    try {
+      final open = await _installments.getOpenInstallments();
+      final history = await _payments.getHistory();
+      if (!mounted) return;
       setState(() {
-        _open = items;
+        _open = open;
+        _history = history;
         _loading = false;
       });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _recordPayment(Installment installment) async {
@@ -57,6 +64,40 @@ class _PaymentsPageState extends State<PaymentsPage> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content:
                 Text(e.toString().replaceFirst('Invalid argument(s): ', ''))));
+    }
+  }
+
+  Future<void> _reversePayment(PaymentRecord payment) async {
+    final result = await showModalBottomSheet<_ReversalDraft>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _ReversePaymentSheet(payment: payment),
+    );
+    if (!mounted || result == null) return;
+    try {
+      await _payments.reverse(
+        payment: payment,
+        reason: result.reason,
+        officer: result.officer,
+      );
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pembayaran dibatalkan dengan transaksi pembalik'),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.toString().replaceFirst('Invalid argument(s): ', ''),
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -190,6 +231,26 @@ class _PaymentsPageState extends State<PaymentsPage> {
                   else
                     ...groups.entries.map((entry) => _FinancingPaymentGroup(
                         items: entry.value, onPay: _recordPayment)),
+                  const SizedBox(height: 28),
+                  Row(children: [
+                    Text('Riwayat pembayaran',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    const Spacer(),
+                    Text(_history.length.toString() + ' transaksi',
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelLarge
+                            ?.copyWith(color: const Color(0xFF087F5B)))
+                  ]),
+                  const SizedBox(height: 12),
+                  if (_history.isEmpty)
+                    const _HistoryEmpty()
+                  else
+                    ..._history.map((payment) => _PaymentHistoryCard(
+                        payment: payment, onReverse: _reversePayment)),
                 ]),
     );
   }
@@ -411,6 +472,309 @@ class _PaymentDraft {
   final int amount;
   final String method;
   final String notes;
+}
+
+class _ReversalDraft {
+  const _ReversalDraft({required this.reason, required this.officer});
+
+  final String reason;
+  final String officer;
+}
+
+class _ReversePaymentSheet extends StatefulWidget {
+  const _ReversePaymentSheet({required this.payment});
+
+  final PaymentRecord payment;
+
+  @override
+  State<_ReversePaymentSheet> createState() => _ReversePaymentSheetState();
+}
+
+class _ReversePaymentSheetState extends State<_ReversePaymentSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _reason = TextEditingController();
+  final _officer = TextEditingController(text: 'Admin');
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    _officer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          MediaQuery.viewInsetsOf(context).bottom + 20,
+        ),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Batalkan Pembayaran',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  widget.payment.customerName +
+                      ' • ' +
+                      widget.payment.financingNumber,
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  color: const Color(0xFFFFF4E5),
+                  child: const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: Text(
+                      'Pembayaran awal tidak dihapus. Aplikasi akan membuat transaksi pembalik dan mengembalikan sisa tagihan.',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _AuditLine(
+                  label: 'Nominal dibatalkan',
+                  value: formatCurrency(widget.payment.amount),
+                ),
+                _AuditLine(
+                  label: 'Angsuran',
+                  value: '#' + widget.payment.installmentNumber.toString(),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _reason,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Alasan pembatalan',
+                    hintText: 'Contoh: nominal salah input',
+                    prefixIcon: Icon(Icons.description_outlined),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Alasan pembatalan wajib diisi'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _officer,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama petugas',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Nama petugas wajib diisi'
+                      : null,
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFB42318),
+                    ),
+                    onPressed: () {
+                      if (_formKey.currentState!.validate()) {
+                        Navigator.pop(
+                          context,
+                          _ReversalDraft(
+                            reason: _reason.text.trim(),
+                            officer: _officer.text.trim(),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.undo),
+                    label: const Text('Konfirmasi pembatalan'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+class _AuditLine extends StatelessWidget {
+  const _AuditLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            Expanded(child: Text(label)),
+            Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+          ],
+        ),
+      );
+}
+
+class _PaymentHistoryCard extends StatelessWidget {
+  const _PaymentHistoryCard({required this.payment, required this.onReverse});
+
+  final PaymentRecord payment;
+  final ValueChanged<PaymentRecord> onReverse;
+
+  @override
+  Widget build(BuildContext context) {
+    final amountText =
+        (payment.amount < 0 ? '-' : '') + formatCurrency(payment.amount.abs());
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    payment.customerName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _PaymentRecordStatus(status: payment.status),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              payment.financingNumber +
+                  ' • Angsuran #' +
+                  payment.installmentNumber.toString(),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    formatDateTime(payment.paymentDate) +
+                        ' • ' +
+                        payment.paymentMethod,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                Text(
+                  amountText,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: payment.amount < 0
+                        ? const Color(0xFFB42318)
+                        : const Color(0xFF087F5B),
+                  ),
+                ),
+              ],
+            ),
+            if (payment.isVoided) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF1EF),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Alasan: ' +
+                      (payment.voidReason ?? '-') +
+                      '\nPetugas: ' +
+                      (payment.voidedBy ?? '-') +
+                      '\nDibatalkan: ' +
+                      (payment.voidedAt == null
+                          ? '-'
+                          : formatDateTime(payment.voidedAt!)),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+            if (payment.canReverse) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => onReverse(payment),
+                  icon: const Icon(Icons.undo),
+                  label: const Text('Batalkan pembayaran'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentRecordStatus extends StatelessWidget {
+  const _PaymentRecordStatus({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = switch (status) {
+      'Dibatalkan' => const Color(0xFFFFE6E1),
+      'Pembalik' => const Color(0xFFFFF4D9),
+      _ => const Color(0xFFEAF5F0),
+    };
+    final foreground = switch (status) {
+      'Dibatalkan' => const Color(0xFFB42318),
+      'Pembalik' => const Color(0xFF8A5A00),
+      _ => const Color(0xFF087F5B),
+    };
+    final label = switch (status) {
+      'Dibatalkan' => 'Dibatalkan',
+      'Pembalik' => 'Pembalik',
+      _ => 'Tercatat',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryEmpty extends StatelessWidget {
+  const _HistoryEmpty();
+
+  @override
+  Widget build(BuildContext context) => const Card(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text(
+            'Belum ada pembayaran yang tercatat.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
 }
 
 class _MoneyFormatter extends TextInputFormatter {
