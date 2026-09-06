@@ -142,7 +142,7 @@ class BackupRepository {
           'Kata sandi salah atau berkas cadangan telah diubah.');
     } on FormatException {
       throw BackupException(
-          'Berkas ini bukan cadangan Syari Finance yang valid.');
+          'Berkas ini bukan cadangan Arafah Finance yang valid.');
     }
   }
 

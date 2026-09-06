@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/whatsapp.dart';
 import '../../installments/data/installment_repository.dart';
 import '../../installments/domain/installment.dart';
 import '../data/payment_repository.dart';
@@ -64,6 +66,34 @@ class _PaymentsPageState extends State<PaymentsPage> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content:
                 Text(e.toString().replaceFirst('Invalid argument(s): ', ''))));
+    }
+  }
+
+  Future<void> _sendWhatsAppReminder(
+    Installment installment,
+    int remainingInstallments,
+  ) async {
+    final phone = normalizeWhatsAppNumber(installment.customerPhone);
+    if (phone == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nomor WhatsApp nasabah tidak valid')),
+      );
+      return;
+    }
+    final message = paymentReminderMessage(
+      customerName: installment.customerName,
+      financingNumber: installment.financingNumber,
+      itemName: installment.itemName,
+      installmentNumber: installment.number,
+      remainingInstallments: remainingInstallments,
+      remainingAmount: installment.remaining,
+      dueDate: installment.dueDate,
+    );
+    final uri = Uri.https('wa.me', '/$phone', {'text': message});
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('WhatsApp tidak dapat dibuka')),
+      );
     }
   }
 
@@ -230,7 +260,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
                     const _Empty()
                   else
                     ...groups.entries.map((entry) => _FinancingPaymentGroup(
-                        items: entry.value, onPay: _recordPayment)),
+                        items: entry.value,
+                        onPay: _recordPayment,
+                        onSendReminder: _sendWhatsAppReminder)),
                   const SizedBox(height: 28),
                   Row(children: [
                     Text('Riwayat pembayaran',
@@ -257,9 +289,14 @@ class _PaymentsPageState extends State<PaymentsPage> {
 }
 
 class _FinancingPaymentGroup extends StatelessWidget {
-  const _FinancingPaymentGroup({required this.items, required this.onPay});
+  const _FinancingPaymentGroup({
+    required this.items,
+    required this.onPay,
+    required this.onSendReminder,
+  });
   final List<Installment> items;
   final ValueChanged<Installment> onPay;
+  final void Function(Installment, int) onSendReminder;
 
   @override
   Widget build(BuildContext context) {
@@ -340,6 +377,20 @@ class _FinancingPaymentGroup extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => onSendReminder(
+                              item,
+                              items
+                                  .where((other) => other.number > item.number)
+                                  .length,
+                            ),
+                            icon: const Icon(Icons.chat_outlined),
+                            label: const Text('Tagih via WhatsApp'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(

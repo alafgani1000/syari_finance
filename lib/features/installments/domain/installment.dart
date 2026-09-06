@@ -3,6 +3,8 @@ class Installment {
       {required this.id,
       required this.financingNumber,
       required this.customerName,
+      required this.customerPhone,
+      required this.itemName,
       required this.number,
       required this.dueDate,
       required this.amount,
@@ -10,6 +12,8 @@ class Installment {
   final String id;
   final String financingNumber;
   final String customerName;
+  final String customerPhone;
+  final String itemName;
   final int number;
   final DateTime dueDate;
   final int amount;

@@ -54,7 +54,7 @@ class SyariFinanceApp extends ConsumerWidget {
   const SyariFinanceApp({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) => MaterialApp.router(
-        title: 'Syari Finance',
+        title: 'Arafah Finance',
         theme: AppTheme.light,
         routerConfig: ref.watch(routerProvider),
         debugShowCheckedModeBanner: false,
@@ -83,11 +83,6 @@ class AppShell extends StatelessWidget {
           leading: Padding(
               padding: const EdgeInsets.fromLTRB(8, 10, 2, 10),
               child: Image.asset('assets/branding/syari-finance-logo.png')),
-          title: Text('Syari Finance',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.2)),
           actions: [
             IconButton(
               tooltip: 'Pemesanan',

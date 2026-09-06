@@ -5,8 +5,10 @@ import '../domain/murabahah_calculator.dart';
 import '../../../core/utils/formatters.dart';
 import '../data/financing_repository.dart';
 import '../../customers/data/customer_repository.dart';
+import '../../installments/data/installment_repository.dart';
 import '../../orders/data/order_repository.dart';
 import '../../orders/domain/order.dart';
+import '../services/financing_pdf_service.dart';
 
 class FinancingsPage extends StatefulWidget {
   const FinancingsPage({this.orderId, super.key});
@@ -546,6 +548,24 @@ class _FinancingDetailSheet extends StatelessWidget {
   const _FinancingDetailSheet({required this.financing});
 
   final Financing financing;
+  static final _installments = InstallmentRepository();
+  static final _pdfService = FinancingPdfService();
+
+  Future<void> _printPdf(BuildContext context) async {
+    try {
+      final installments = await _installments.getForFinancing(financing.number);
+      await _pdfService.printFinancing(
+        financing: financing,
+        installments: installments,
+      );
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal membuat PDF pembiayaan')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -625,12 +645,20 @@ class _FinancingDetailSheet extends StatelessWidget {
                 value: formatCurrency(financing.downPayment),
               ),
               _DetailRow(
+                label: 'Pokok pembiayaan',
+                value: formatCurrency(financing.calculation.principal),
+              ),
+              _DetailRow(
                 label: 'Margin',
                 value: formatCurrency(financing.margin),
               ),
               _DetailRow(
-                label: 'Harga jual',
+                label: 'Nilai akad pembiayaan',
                 value: formatCurrency(financing.calculation.salePrice),
+              ),
+              _DetailRow(
+                label: 'Total pembayaran pelanggan',
+                value: formatCurrency(financing.totalCustomerPayment),
               ),
               _DetailRow(
                 label: 'Angsuran per bulan',
@@ -650,6 +678,15 @@ class _FinancingDetailSheet extends StatelessWidget {
                 value: formatDate(financing.startDate),
               ),
               const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _printPdf(context),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('Cetak rincian PDF'),
+                ),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -869,6 +906,12 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                                         TextStyle(fontWeight: FontWeight.w800)),
                                 const SizedBox(height: 12),
                                 _SummaryRow(
+                                    label: 'Harga barang',
+                                    value: formatCurrency(_number(_price))),
+                                _SummaryRow(
+                                    label: 'Uang muka / DP',
+                                    value: formatCurrency(_number(_dp))),
+                                _SummaryRow(
                                     label: 'Pokok pembiayaan',
                                     value: formatCurrency(
                                         _calculation!.principal)),
@@ -876,9 +919,14 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                                     label: 'Margin keuntungan',
                                     value: formatCurrency(_number(_margin))),
                                 _SummaryRow(
-                                    label: 'Harga jual',
+                                    label: 'Nilai akad pembiayaan',
                                     value: formatCurrency(
                                         _calculation!.salePrice)),
+                                _SummaryRow(
+                                    label: 'Total pembayaran pelanggan',
+                                    value: formatCurrency(
+                                        _number(_dp) +
+                                            _calculation!.salePrice)),
                                 _SummaryRow(
                                     label: _calculation!.hasFinalAdjustment
                                         ? 'Angsuran reguler / bulan'

@@ -32,5 +32,7 @@ class Financing {
   final int? remainingAmount;
 
   int get outstanding => remainingAmount ?? calculation.salePrice;
+  // Total paid by the customer: the upfront DP plus the financed sale price.
+  int get totalCustomerPayment => downPayment + calculation.salePrice;
   bool get isPaid => status.toLowerCase() == 'lunas' || outstanding <= 0;
 }
