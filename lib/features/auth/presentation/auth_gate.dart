@@ -301,15 +301,37 @@ class _AuthScaffold extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFD9F5E9),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Icon(Icons.shield_outlined),
+                        Row(
+                          children: [
+                            Container(
+                              width: 52,
+                              height: 52,
+                              padding: const EdgeInsets.all(5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD9F5E9),
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              child: Image.asset(
+                                'assets/branding/syari-finance-logo.png',
+                                cacheWidth: 112,
+                                filterQuality: FilterQuality.medium,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Arafah Finance',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 22),
                         Text(
                           title,
                           style: Theme.of(context)
