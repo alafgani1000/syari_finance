@@ -79,7 +79,7 @@ class BackupRepository {
     });
 
     final directory = await _database.backupDirectory();
-    final fileName = 'syari-finance-' + _fileStamp(createdAt) + '.syaribackup';
+    final fileName = 'syari-finance-${_fileStamp(createdAt)}.syaribackup';
     final file = File(p.join(directory.path, fileName));
     await file.writeAsBytes(utf8.encode(envelope), flush: true);
     return BackupExport(file: file, createdAt: createdAt.toLocal());
@@ -181,11 +181,6 @@ class BackupRepository {
 
   String _fileStamp(DateTime value) {
     String two(int number) => number.toString().padLeft(2, '0');
-    return value.year.toString() +
-        two(value.month) +
-        two(value.day) +
-        '-' +
-        two(value.hour) +
-        two(value.minute);
+    return '${value.year}${two(value.month)}${two(value.day)}-${two(value.hour)}${two(value.minute)}';
   }
 }

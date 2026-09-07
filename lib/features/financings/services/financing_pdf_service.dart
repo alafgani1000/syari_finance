@@ -18,6 +18,90 @@ class FinancingPdfService {
         onLayout: (_) => _buildPdf(financing, installments),
       );
 
+  Future<void> printContract(Financing financing) => Printing.layoutPdf(
+        name: 'draf-akad-${financing.number}.pdf',
+        onLayout: (_) => _buildContract(financing),
+      );
+
+  Future<Uint8List> _buildContract(Financing financing) async {
+    final document = pw.Document();
+    document.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(36),
+        build: (_) => [
+          pw.Center(
+            child: pw.Text(
+              'DRAF AKAD PEMBIAYAAN MURABAHAH',
+              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Center(child: pw.Text(financing.number)),
+          pw.SizedBox(height: 22),
+          pw.Text(
+            'Pada tanggal ${formatDate(financing.startDate)}, Arafah Finance dan nasabah berikut menyepakati pembiayaan Murabahah atas barang yang tercantum di bawah ini.',
+            textAlign: pw.TextAlign.justify,
+          ),
+          pw.SizedBox(height: 16),
+          _infoTable([
+            ['Nasabah', financing.customerName],
+            ['Barang', financing.itemName],
+            ['Harga perolehan barang', formatCurrency(financing.itemPrice)],
+            ['Uang muka / DP', formatCurrency(financing.downPayment)],
+            [
+              'Pokok pembiayaan',
+              formatCurrency(financing.calculation.principal)
+            ],
+            ['Margin keuntungan', formatCurrency(financing.margin)],
+            [
+              'Harga jual / nilai akad',
+              formatCurrency(financing.calculation.salePrice)
+            ],
+            ['Tenor', '${financing.tenor} bulan'],
+            [
+              'Angsuran reguler',
+              formatCurrency(financing.calculation.installment)
+            ],
+            if (financing.calculation.hasFinalAdjustment)
+              [
+                'Angsuran bulan terakhir',
+                formatCurrency(financing.calculation.finalInstallment)
+              ],
+          ]),
+          pw.SizedBox(height: 18),
+          pw.Text('Ketentuan ringkas',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 6),
+          pw.Text(
+              '1. Harga jual telah mencakup margin yang disepakati dan tidak berubah selama akad berjalan.'),
+          pw.SizedBox(height: 4),
+          pw.Text(
+              '2. Nasabah membayar angsuran sesuai jadwal yang tercantum pada kartu angsuran.'),
+          pw.SizedBox(height: 4),
+          pw.Text(
+              '3. Dokumen ini adalah draf operasional. Lengkapi identitas, saksi, klausul, dan pengesahan sesuai kebijakan lembaga serta tinjauan pihak berwenang sebelum ditandatangani.'),
+          pw.SizedBox(height: 44),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              _signature('Pihak Arafah Finance'),
+              _signature('Nasabah'),
+            ],
+          ),
+        ],
+      ),
+    );
+    return document.save();
+  }
+
+  pw.Widget _signature(String label) => pw.Column(
+        children: [
+          pw.SizedBox(width: 170, child: pw.Divider()),
+          pw.SizedBox(height: 4),
+          pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
+        ],
+      );
   Future<Uint8List> _buildPdf(
     Financing financing,
     List<Installment> installments,
@@ -73,10 +157,19 @@ class FinancingPdfService {
           _infoTable([
             ['Harga barang', formatCurrency(financing.itemPrice)],
             ['Uang muka / DP', formatCurrency(financing.downPayment)],
-            ['Pokok pembiayaan', formatCurrency(financing.calculation.principal)],
+            [
+              'Pokok pembiayaan',
+              formatCurrency(financing.calculation.principal)
+            ],
             ['Margin keuntungan', formatCurrency(financing.margin)],
-            ['Nilai akad pembiayaan', formatCurrency(financing.calculation.salePrice)],
-            ['Total pembayaran pelanggan', formatCurrency(financing.totalCustomerPayment)],
+            [
+              'Nilai akad pembiayaan',
+              formatCurrency(financing.calculation.salePrice)
+            ],
+            [
+              'Total pembayaran pelanggan',
+              formatCurrency(financing.totalCustomerPayment)
+            ],
             ['Tenor', '${financing.tenor} bulan'],
             ['Sisa tagihan', formatCurrency(financing.outstanding)],
           ]),
@@ -91,8 +184,16 @@ class FinancingPdfService {
               fontSize: 9,
             ),
             cellStyle: const pw.TextStyle(fontSize: 8),
-            cellPadding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
-            headers: const ['Ke-', 'Jatuh tempo', 'Tagihan', 'Terbayar', 'Sisa', 'Status'],
+            cellPadding:
+                const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+            headers: const [
+              'Ke-',
+              'Jatuh tempo',
+              'Tagihan',
+              'Terbayar',
+              'Sisa',
+              'Status'
+            ],
             data: installments
                 .map(
                   (item) => [
@@ -136,20 +237,25 @@ class FinancingPdfService {
 
   pw.Widget _infoTable(List<List<String>> rows) => pw.Table(
         border: pw.TableBorder.all(color: PdfColors.grey300, width: .5),
-        columnWidths: const {0: pw.FlexColumnWidth(2), 1: pw.FlexColumnWidth(3)},
+        columnWidths: const {
+          0: pw.FlexColumnWidth(2),
+          1: pw.FlexColumnWidth(3)
+        },
         children: rows
             .map(
               (row) => pw.TableRow(
                 children: [
                   pw.Padding(
                     padding: const pw.EdgeInsets.all(6),
-                    child: pw.Text(row[0], style: const pw.TextStyle(fontSize: 9)),
+                    child:
+                        pw.Text(row[0], style: const pw.TextStyle(fontSize: 9)),
                   ),
                   pw.Padding(
                     padding: const pw.EdgeInsets.all(6),
                     child: pw.Text(
                       row[1],
-                      style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                      style: pw.TextStyle(
+                          fontSize: 9, fontWeight: pw.FontWeight.bold),
                     ),
                   ),
                 ],

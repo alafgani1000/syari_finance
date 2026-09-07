@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/backup/backup_file_channel.dart';
+import '../../../core/reminders/due_reminder_service.dart';
+import '../../auth/data/auth_controller.dart';
 import '../data/backup_repository.dart';
 
-class BackupSettingsPage extends StatefulWidget {
+class BackupSettingsPage extends ConsumerStatefulWidget {
   const BackupSettingsPage({super.key});
 
   @override
-  State<BackupSettingsPage> createState() => _BackupSettingsPageState();
+  ConsumerState<BackupSettingsPage> createState() => _BackupSettingsPageState();
 }
 
-class _BackupSettingsPageState extends State<BackupSettingsPage> {
+class _BackupSettingsPageState extends ConsumerState<BackupSettingsPage> {
   final _repository = BackupRepository();
   bool _busy = false;
   DateTime? _lastBackupAt;
@@ -27,6 +30,24 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
     final lastBackupAt = await _repository.lastBackupAt();
     if (mounted) {
       setState(() => _lastBackupAt = lastBackupAt);
+    }
+  }
+
+  Future<void> _enableReminders() async {
+    final reminders = DueReminderService();
+    try {
+      final permitted = await reminders.requestPermission();
+      if (!permitted && !await reminders.isPermissionGranted()) {
+        _showMessage(
+            'Izin notifikasi ditolak. Aktifkan melalui pengaturan Android.',
+            error: true);
+        return;
+      }
+      final count = await reminders.scheduleUpcoming();
+      _showMessage(
+          '$count pengingat jatuh tempo dijadwalkan sekitar pukul 09.00.');
+    } catch (error) {
+      _showMessage('Pengingat belum dapat diaktifkan: $error', error: true);
     }
   }
 
@@ -152,9 +173,11 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
         password: password,
       );
       if (!mounted) return;
+      final authController = ref.read(authControllerProvider.notifier);
       context.go(
         '/dashboard?reload=${DateTime.now().microsecondsSinceEpoch}',
       );
+      await authController.initialize();
     } on BackupException catch (error) {
       _showMessage(error.message, error: true);
     } catch (_) {
@@ -216,6 +239,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('d MMMM y, HH:mm', 'id_ID');
+    final isAdmin = ref.watch(authControllerProvider).isAdmin;
     final scheme = Theme.of(context).colorScheme;
     return Stack(
       children: [
@@ -232,6 +256,35 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                   ),
             ),
             const SizedBox(height: 24),
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.notifications_active_outlined),
+                    title: const Text('Pengingat jatuh tempo'),
+                    subtitle: const Text(
+                        'Notifikasi Android sekitar pukul 09.00 pada hari tagihan'),
+                    onTap: _busy ? null : _enableReminders,
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.assessment_outlined),
+                    title: const Text('Laporan & dokumen'),
+                    subtitle:
+                        const Text('PDF, CSV untuk Excel, dan kartu angsuran'),
+                    onTap: isAdmin ? () => context.push('/reports') : null,
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.manage_accounts_outlined),
+                    title: const Text('Pengguna & PIN'),
+                    subtitle: const Text('Kelola Admin dan Petugas'),
+                    onTap: isAdmin ? () => context.push('/users') : null,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(20),
@@ -251,8 +304,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                     Text(
                       _lastBackupAt == null
                           ? 'Belum ada backup tersimpan'
-                          : 'Backup terakhir: ' +
-                              formatter.format(_lastBackupAt!),
+                          : 'Backup terakhir: ${formatter.format(_lastBackupAt!)}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: _lastBackupAt == null
                                 ? scheme.error
@@ -264,7 +316,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _busy ? null : _backup,
+                        onPressed: _busy || !isAdmin ? null : _backup,
                         icon: const Icon(Icons.backup_outlined),
                         label: const Text('Backup Sekarang'),
                       ),
@@ -293,7 +345,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: _busy ? null : _restore,
+                        onPressed: _busy || !isAdmin ? null : _restore,
                         icon: const Icon(Icons.restore),
                         label: const Text('Pulihkan dari Backup'),
                       ),
@@ -302,6 +354,11 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                 ),
               ),
             ),
+            if (!isAdmin) ...[
+              const SizedBox(height: 12),
+              const Text(
+                  'Backup, pemulihan, dan pengelolaan pengguna hanya tersedia untuk Admin.'),
+            ],
             const SizedBox(height: 24),
             Text('Catatan penting',
                 style: Theme.of(context).textTheme.titleSmall),
@@ -363,6 +420,7 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
         title: Text(widget.title),
+        scrollable: true,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

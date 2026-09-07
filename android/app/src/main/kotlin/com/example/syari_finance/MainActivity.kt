@@ -1,24 +1,32 @@
 package com.example.syari_finance
 
+import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "syari_finance/backup_files"
+    private val backupChannelName = "syari_finance/backup_files"
+    private val reminderChannelName = "syari_finance/due_reminders"
     private val saveRequestCode = 8101
     private val openRequestCode = 8102
+    private val notificationPermissionRequestCode = 8103
 
     private var pendingResult: MethodChannel.Result? = null
     private var pendingSource: File? = null
     private var pendingDestination: String? = null
+    private var pendingNotificationPermissionResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, backupChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "saveBackup" -> saveBackup(
@@ -31,6 +39,96 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, reminderChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isPermissionGranted" -> result.success(notificationPermissionGranted())
+                    "requestPermission" -> {
+                        if (notificationPermissionGranted()) {
+                            result.success(true)
+                        } else if (pendingNotificationPermissionResult != null) {
+                            result.error("busy", "Permintaan izin notifikasi masih berlangsung.", null)
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            pendingNotificationPermissionResult = result
+                            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationPermissionRequestCode)
+                        } else {
+                            result.success(true)
+                        }
+                    }
+                    "schedule" -> scheduleReminders(
+                        call.argument<List<Map<String, Any?>>>("reminders") ?: emptyList(),
+                        result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != notificationPermissionRequestCode) return
+        val result = pendingNotificationPermissionResult
+        pendingNotificationPermissionResult = null
+        result?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+    }
+    private fun notificationPermissionGranted(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun scheduleReminders(reminders: List<Map<String, Any?>>, result: MethodChannel.Result) {
+        if (!notificationPermissionGranted()) {
+            result.error("permission_denied", "Izinkan notifikasi Android terlebih dahulu.", null)
+            return
+        }
+        val alarmManager = getSystemService(AlarmManager::class.java)
+        val preferences = getSharedPreferences("due_reminders", MODE_PRIVATE)
+        val scheduledIds = reminders.mapNotNull { (it["id"] as? Number)?.toInt() }.toSet()
+        val previousIds = preferences.getStringSet("ids", emptySet()) ?: emptySet()
+        previousIds.mapNotNull { it.toIntOrNull() }.filter { it !in scheduledIds }.forEach { id ->
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                id,
+                Intent(this, DueReminderReceiver::class.java),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+            )
+            if (pendingIntent != null) {
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+            }
+        }
+        var scheduled = 0
+        try {
+            reminders.forEach { reminder ->
+                val id = (reminder["id"] as? Number)?.toInt() ?: return@forEach
+                val timestamp = (reminder["timestamp"] as? Number)?.toLong() ?: return@forEach
+                if (timestamp <= System.currentTimeMillis()) return@forEach
+                val intent = Intent(this, DueReminderReceiver::class.java).apply {
+                    putExtra(DueReminderReceiver.extraId, id)
+                    putExtra(DueReminderReceiver.extraTitle, reminder["title"] as? String ?: "Jatuh tempo angsuran")
+                    putExtra(DueReminderReceiver.extraBody, reminder["body"] as? String ?: "Periksa pembayaran nasabah.")
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    this,
+                    id,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timestamp, pendingIntent)
+                } else {
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, timestamp, pendingIntent)
+                }
+                scheduled++
+            }
+            preferences.edit().putStringSet("ids", scheduledIds.map { it.toString() }.toSet()).apply()
+            result.success(scheduled)
+        } catch (error: SecurityException) {
+            result.error("alarm_permission", "Aktifkan izin alarm & pengingat di pengaturan Android agar jadwal tepat waktu.", null)
+        }
     }
 
     private fun saveBackup(

@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/reminders/due_reminder_service.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/whatsapp.dart';
+import '../../auth/data/auth_controller.dart';
 import '../../installments/data/installment_repository.dart';
 import '../../installments/domain/installment.dart';
 import '../data/payment_repository.dart';
+import '../services/payment_receipt_pdf_service.dart';
 
-class PaymentsPage extends StatefulWidget {
+class PaymentsPage extends ConsumerStatefulWidget {
   const PaymentsPage({super.key});
   @override
-  State<PaymentsPage> createState() => _PaymentsPageState();
+  ConsumerState<PaymentsPage> createState() => _PaymentsPageState();
 }
 
-class _PaymentsPageState extends State<PaymentsPage> {
+class _PaymentsPageState extends ConsumerState<PaymentsPage> {
   final _installments = InstallmentRepository();
   final _payments = PaymentRepository();
   List<Installment> _open = [];
@@ -59,13 +63,16 @@ class _PaymentsPageState extends State<PaymentsPage> {
           notes: result.notes);
       if (!mounted) return;
       await _load();
+      await _syncReminders();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Pembayaran berhasil dicatat')));
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content:
                 Text(e.toString().replaceFirst('Invalid argument(s): ', ''))));
+      }
     }
   }
 
@@ -90,28 +97,56 @@ class _PaymentsPageState extends State<PaymentsPage> {
       dueDate: installment.dueDate,
     );
     final uri = Uri.https('wa.me', '/$phone', {'text': message});
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
+        mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('WhatsApp tidak dapat dibuka')),
       );
     }
   }
 
+  Future<void> _syncReminders() async {
+    try {
+      final reminders = DueReminderService();
+      if (await reminders.isPermissionGranted()) {
+        await reminders.scheduleUpcoming();
+      }
+    } catch (_) {
+      // Pembayaran tetap tersimpan walau pengingat Android belum tersedia.
+    }
+  }
+
+  Future<void> _printReceipt(PaymentRecord payment) async {
+    try {
+      await PaymentReceiptPdfService().printReceipt(payment);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kuitansi belum dapat dibuat')),
+        );
+      }
+    }
+  }
+
   Future<void> _reversePayment(PaymentRecord payment) async {
+    final officer = ref.read(authControllerProvider).user;
+    if (officer == null || !officer.isAdmin) return;
     final result = await showModalBottomSheet<_ReversalDraft>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _ReversePaymentSheet(payment: payment),
+      builder: (_) =>
+          _ReversePaymentSheet(payment: payment, officerName: officer.name),
     );
     if (!mounted || result == null) return;
     try {
       await _payments.reverse(
         payment: payment,
         reason: result.reason,
-        officer: result.officer,
+        officer: officer.name,
       );
       await _load();
+      await _syncReminders();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -271,7 +306,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                             .titleMedium
                             ?.copyWith(fontWeight: FontWeight.w800)),
                     const Spacer(),
-                    Text(_history.length.toString() + ' transaksi',
+                    Text('${_history.length} transaksi',
                         style: Theme.of(context)
                             .textTheme
                             .labelLarge
@@ -282,7 +317,11 @@ class _PaymentsPageState extends State<PaymentsPage> {
                     const _HistoryEmpty()
                   else
                     ..._history.map((payment) => _PaymentHistoryCard(
-                        payment: payment, onReverse: _reversePayment)),
+                        payment: payment,
+                        onReverse: _reversePayment,
+                        onPrint: _printReceipt,
+                        allowReverse:
+                            ref.watch(authControllerProvider).isAdmin)),
                 ]),
     );
   }
@@ -477,13 +516,14 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                         prefixIcon: Icon(Icons.payments_outlined)),
                     validator: (_) {
                       if (_value <= 0) return 'Nominal wajib diisi';
-                      if (_value > widget.installment.remaining)
+                      if (_value > widget.installment.remaining) {
                         return 'Nominal melebihi sisa angsuran';
+                      }
                       return null;
                     }),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                    value: _method,
+                    initialValue: _method,
                     decoration: const InputDecoration(
                         labelText: 'Metode Pembayaran',
                         prefixIcon: Icon(Icons.account_balance_outlined)),
@@ -507,11 +547,12 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                     width: double.infinity,
                     child: FilledButton.icon(
                         onPressed: () {
-                          if (_formKey.currentState!.validate())
+                          if (_formKey.currentState!.validate()) {
                             Navigator.pop(
                                 context,
                                 _PaymentDraft(
                                     _value, _method, _notes.text.trim()));
+                          }
                         },
                         icon: const Icon(Icons.check_circle_outline),
                         label: const Text('Simpan Pembayaran')))
@@ -526,16 +567,17 @@ class _PaymentDraft {
 }
 
 class _ReversalDraft {
-  const _ReversalDraft({required this.reason, required this.officer});
+  const _ReversalDraft({required this.reason});
 
   final String reason;
-  final String officer;
 }
 
 class _ReversePaymentSheet extends StatefulWidget {
-  const _ReversePaymentSheet({required this.payment});
+  const _ReversePaymentSheet(
+      {required this.payment, required this.officerName});
 
   final PaymentRecord payment;
+  final String officerName;
 
   @override
   State<_ReversePaymentSheet> createState() => _ReversePaymentSheetState();
@@ -544,12 +586,10 @@ class _ReversePaymentSheet extends StatefulWidget {
 class _ReversePaymentSheetState extends State<_ReversePaymentSheet> {
   final _formKey = GlobalKey<FormState>();
   final _reason = TextEditingController();
-  final _officer = TextEditingController(text: 'Admin');
 
   @override
   void dispose() {
     _reason.dispose();
-    _officer.dispose();
     super.dispose();
   }
 
@@ -576,14 +616,12 @@ class _ReversePaymentSheetState extends State<_ReversePaymentSheet> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  widget.payment.customerName +
-                      ' • ' +
-                      widget.payment.financingNumber,
+                  '${widget.payment.customerName} • ${widget.payment.financingNumber}',
                 ),
                 const SizedBox(height: 16),
-                Card(
-                  color: const Color(0xFFFFF4E5),
-                  child: const Padding(
+                const Card(
+                  color: Color(0xFFFFF4E5),
+                  child: Padding(
                     padding: EdgeInsets.all(14),
                     child: Text(
                       'Pembayaran awal tidak dihapus. Aplikasi akan membuat transaksi pembalik dan mengembalikan sisa tagihan.',
@@ -597,7 +635,7 @@ class _ReversePaymentSheetState extends State<_ReversePaymentSheet> {
                 ),
                 _AuditLine(
                   label: 'Angsuran',
-                  value: '#' + widget.payment.installmentNumber.toString(),
+                  value: '#${widget.payment.installmentNumber}',
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -614,16 +652,9 @@ class _ReversePaymentSheetState extends State<_ReversePaymentSheet> {
                       : null,
                 ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _officer,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Nama petugas',
-                    prefixIcon: Icon(Icons.person_outline),
-                  ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Nama petugas wajib diisi'
-                      : null,
+                _AuditLine(
+                  label: 'Petugas koreksi',
+                  value: widget.officerName,
                 ),
                 const SizedBox(height: 20),
                 SizedBox(
@@ -636,10 +667,7 @@ class _ReversePaymentSheetState extends State<_ReversePaymentSheet> {
                       if (_formKey.currentState!.validate()) {
                         Navigator.pop(
                           context,
-                          _ReversalDraft(
-                            reason: _reason.text.trim(),
-                            officer: _officer.text.trim(),
-                          ),
+                          _ReversalDraft(reason: _reason.text.trim()),
                         );
                       }
                     },
@@ -673,10 +701,16 @@ class _AuditLine extends StatelessWidget {
 }
 
 class _PaymentHistoryCard extends StatelessWidget {
-  const _PaymentHistoryCard({required this.payment, required this.onReverse});
+  const _PaymentHistoryCard(
+      {required this.payment,
+      required this.onReverse,
+      required this.onPrint,
+      required this.allowReverse});
 
   final PaymentRecord payment;
   final ValueChanged<PaymentRecord> onReverse;
+  final ValueChanged<PaymentRecord> onPrint;
+  final bool allowReverse;
 
   @override
   Widget build(BuildContext context) {
@@ -706,9 +740,7 @@ class _PaymentHistoryCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              payment.financingNumber +
-                  ' • Angsuran #' +
-                  payment.installmentNumber.toString(),
+              '${payment.financingNumber} • Angsuran #${payment.installmentNumber}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 10),
@@ -716,9 +748,7 @@ class _PaymentHistoryCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    formatDateTime(payment.paymentDate) +
-                        ' • ' +
-                        payment.paymentMethod,
+                    '${formatDateTime(payment.paymentDate)} • ${payment.paymentMethod}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -743,19 +773,23 @@ class _PaymentHistoryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  'Alasan: ' +
-                      (payment.voidReason ?? '-') +
-                      '\nPetugas: ' +
-                      (payment.voidedBy ?? '-') +
-                      '\nDibatalkan: ' +
-                      (payment.voidedAt == null
-                          ? '-'
-                          : formatDateTime(payment.voidedAt!)),
+                  'Alasan: ${payment.voidReason ?? '-'}\nPetugas: ${payment.voidedBy ?? '-'}\nDibatalkan: ${payment.voidedAt == null ? '-' : formatDateTime(payment.voidedAt!)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
             ],
-            if (payment.canReverse) ...[
+            if (payment.status == 'posted') ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => onPrint(payment),
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  label: const Text('Cetak kuitansi'),
+                ),
+              ),
+            ],
+            if (payment.canReverse && allowReverse) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,

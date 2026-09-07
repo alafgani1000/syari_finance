@@ -24,6 +24,16 @@ class BackupFileChannel {
     return savedLocation;
   }
 
+  static Future<String?> saveFile(
+    File file, {
+    required String fileName,
+  }) =>
+      _channel.invokeMethod<String>('saveBackup', {
+        'sourcePath': file.path,
+        'fileName': fileName,
+        'destination': 'other',
+      });
+
   static Future<File?> pickBackup() async {
     final path = await _channel.invokeMethod<String>('pickBackup');
     return path == null ? null : File(path);

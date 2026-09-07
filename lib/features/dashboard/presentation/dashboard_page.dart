@@ -1,14 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/reminders/due_reminder_service.dart';
 import '../../../core/utils/formatters.dart';
+import '../../auth/data/auth_controller.dart';
 import '../data/dashboard_repository.dart';
 
-class DashboardPage extends StatefulWidget {
+class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
   @override
-  State<DashboardPage> createState() => _DashboardPageState();
+  ConsumerState<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends ConsumerState<DashboardPage> {
   final _repository = DashboardRepository();
   late Future<DashboardData> _future;
 
@@ -16,10 +22,23 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _future = _repository.load();
+    unawaited(_syncReminders());
+  }
+
+  Future<void> _syncReminders() async {
+    try {
+      final reminders = DueReminderService();
+      if (await reminders.isPermissionGranted()) {
+        await reminders.scheduleUpcoming();
+      }
+    } catch (_) {
+      // Pengingat tidak boleh menghalangi dashboard bila izin Android belum ada.
+    }
   }
 
   Future<void> _refresh() async {
     final future = _repository.load();
+    unawaited(_syncReminders());
     setState(() {
       _future = future;
     });
@@ -34,12 +53,14 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) => FutureBuilder<DashboardData>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done)
+          if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError)
+          }
+          if (snapshot.hasError) {
             return Center(
                 child: FilledButton(
                     onPressed: _refresh, child: const Text('Coba lagi')));
+          }
           final data = snapshot.data!;
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -96,7 +117,50 @@ class _DashboardPageState extends State<DashboardPage> {
                             icon: Icons.warning_amber_outlined,
                             tint: const Color(0xFFFFE6E1)),
                       ]),
-                  const SizedBox(height: 28),
+                  if (ref.watch(authControllerProvider).isAdmin) ...[
+                    const SizedBox(height: 24),
+                    const _Title(
+                      title: 'Ringkasan bisnis',
+                      action: 'Lihat laporan',
+                    ),
+                    const SizedBox(height: 10),
+                    _BusinessMetric(
+                      label: 'Pencairan pembiayaan',
+                      value: formatCurrency(data.totalDisbursed),
+                      icon: Icons.account_balance_outlined,
+                      description: 'Total pokok akad aktif dan lunas',
+                    ),
+                    const SizedBox(height: 10),
+                    _BusinessMetric(
+                      label: 'Potensi margin akad',
+                      value: formatCurrency(data.plannedMargin),
+                      icon: Icons.trending_up_outlined,
+                      description: 'Keuntungan yang tercantum pada akad',
+                    ),
+                    const SizedBox(height: 10),
+                    _BusinessMetric(
+                      label: 'Penerimaan bulan ini',
+                      value: formatCurrency(data.collectedThisMonth),
+                      icon: Icons.savings_outlined,
+                      description: 'Pembayaran tercatat pada bulan berjalan',
+                    ),
+                    const SizedBox(height: 10),
+                    _BusinessMetric(
+                      label: 'Nilai tunggakan',
+                      value: formatCurrency(data.overdueAmount),
+                      icon: Icons.warning_amber_outlined,
+                      description:
+                          '${data.overdueCount} angsuran melewati jatuh tempo',
+                      warning: true,
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () => context.go('/reports'),
+                      icon: const Icon(Icons.assessment_outlined),
+                      label: const Text('Buka laporan & ekspor'),
+                    ),
+                    const SizedBox(height: 28),
+                  ],
                   _Title(
                       title: 'Angsuran jatuh tempo hari ini',
                       action: '${data.dueTodayCount} tagihan'),
@@ -226,4 +290,53 @@ class _Empty extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall)
           ])));
+}
+
+class _BusinessMetric extends StatelessWidget {
+  const _BusinessMetric({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.description,
+    this.warning = false,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final String description;
+  final bool warning;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          leading: CircleAvatar(
+            backgroundColor:
+                warning ? const Color(0xFFFFE6E1) : const Color(0xFFE3F5EE),
+            child: Icon(
+              icon,
+              color:
+                  warning ? const Color(0xFFB42318) : const Color(0xFF087F5B),
+            ),
+          ),
+          title:
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(description),
+          trailing: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 118),
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: warning ? const Color(0xFFB42318) : null,
+              ),
+            ),
+          ),
+        ),
+      );
 }

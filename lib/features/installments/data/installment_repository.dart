@@ -8,8 +8,8 @@ class InstallmentRepository {
 
   Future<List<Installment>> getOpenInstallments() async {
     final db = await _database.database;
-    final rows = await db
-        .rawQuery('''SELECT i.*, f.financing_number, f.item_name,
+    final rows =
+        await db.rawQuery('''SELECT i.*, f.financing_number, f.item_name,
         c.name AS customer_name,
         c.phone AS customer_phone
       FROM installments i

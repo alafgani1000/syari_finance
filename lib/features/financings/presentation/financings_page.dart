@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../domain/financing.dart';
 import '../domain/murabahah_calculator.dart';
+import '../../../core/reminders/due_reminder_service.dart';
 import '../../../core/utils/formatters.dart';
 import '../data/financing_repository.dart';
 import '../../customers/data/customer_repository.dart';
@@ -66,6 +67,17 @@ class _FinancingsPageState extends State<FinancingsPage> {
     }
   }
 
+  Future<void> _syncReminders() async {
+    try {
+      final reminders = DueReminderService();
+      if (await reminders.isPermissionGranted()) {
+        await reminders.scheduleUpcoming();
+      }
+    } catch (_) {
+      // Pembiayaan tetap tersimpan walau pengingat Android belum tersedia.
+    }
+  }
+
   Future<void> _openOrder(String orderId) async {
     final order = await _orderRepository.getById(orderId);
     if (!mounted || order == null) return;
@@ -92,10 +104,8 @@ class _FinancingsPageState extends State<FinancingsPage> {
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => _FinancingFormSheet(
-        number: 'MRB-' +
-            DateTime.now().year.toString() +
-            '-' +
-            _sequence.toString().padLeft(6, '0'),
+        number:
+            'MRB-${DateTime.now().year}-${_sequence.toString().padLeft(6, '0')}',
         customers: customers,
         order: order,
       ),
@@ -104,6 +114,7 @@ class _FinancingsPageState extends State<FinancingsPage> {
     try {
       await _repository.save(result);
       await _loadFinancings();
+      await _syncReminders();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Pembiayaan berhasil disimpan')),
@@ -240,7 +251,7 @@ class _FinancingsPageState extends State<FinancingsPage> {
                         ),
                       ),
                       Text(
-                        visible.length.toString() + ' data',
+                        '${visible.length} data',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: const Color(0xFF68736E),
                               fontWeight: FontWeight.w600,
@@ -370,7 +381,7 @@ class _FinancingCard extends StatelessWidget {
                   Expanded(
                     child: _CardMetric(
                       label: 'Tenor',
-                      value: financing.tenor.toString() + ' bulan',
+                      value: '${financing.tenor} bulan',
                     ),
                   ),
                 ],
@@ -389,7 +400,7 @@ class _FinancingCard extends StatelessWidget {
                     child: Text(
                       financing.isPaid
                           ? 'Lunas'
-                          : 'Sisa ' + formatCurrency(remaining),
+                          : 'Sisa ${formatCurrency(remaining)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.right,
@@ -551,9 +562,22 @@ class _FinancingDetailSheet extends StatelessWidget {
   static final _installments = InstallmentRepository();
   static final _pdfService = FinancingPdfService();
 
+  Future<void> _printContract(BuildContext context) async {
+    try {
+      await _pdfService.printContract(financing);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal membuat draf akad')),
+        );
+      }
+    }
+  }
+
   Future<void> _printPdf(BuildContext context) async {
     try {
-      final installments = await _installments.getForFinancing(financing.number);
+      final installments =
+          await _installments.getForFinancing(financing.number);
       await _pdfService.printFinancing(
         financing: financing,
         installments: installments,
@@ -661,12 +685,19 @@ class _FinancingDetailSheet extends StatelessWidget {
                 value: formatCurrency(financing.totalCustomerPayment),
               ),
               _DetailRow(
-                label: 'Angsuran per bulan',
+                label: financing.calculation.hasFinalAdjustment
+                    ? 'Angsuran reguler / bulan'
+                    : 'Angsuran per bulan',
                 value: formatCurrency(financing.calculation.installment),
               ),
+              if (financing.calculation.hasFinalAdjustment)
+                _DetailRow(
+                  label: 'Angsuran bulan terakhir',
+                  value: formatCurrency(financing.calculation.finalInstallment),
+                ),
               _DetailRow(
                 label: 'Tenor',
-                value: financing.tenor.toString() + ' bulan',
+                value: '${financing.tenor} bulan',
               ),
               _DetailRow(
                 label: 'Sisa tagihan',
@@ -678,6 +709,15 @@ class _FinancingDetailSheet extends StatelessWidget {
                 value: formatDate(financing.startDate),
               ),
               const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _printContract(context),
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('Cetak draf akad'),
+                ),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -768,7 +808,9 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
   @override
   void initState() {
     super.initState();
-    for (final c in [_price, _dp, _margin, _tenor]) c.addListener(_calculate);
+    for (final c in [_price, _dp, _margin, _tenor]) {
+      c.addListener(_calculate);
+    }
     final order = widget.order;
     if (order != null) {
       for (final customer in widget.customers) {
@@ -779,7 +821,7 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
       }
       _customerDisplay.text = _selectedCustomer == null
           ? order.customerName
-          : _selectedCustomer!.name + ' • ' + _selectedCustomer!.phone;
+          : '${_selectedCustomer!.name} • ${_selectedCustomer!.phone}';
       _item.text = order.itemName;
       _price.text = _formatInputMoney(
         order.purchasePrice ?? order.estimatedPrice,
@@ -791,8 +833,9 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
 
   @override
   void dispose() {
-    for (final c in [_customerDisplay, _item, _price, _dp, _margin, _tenor])
+    for (final c in [_customerDisplay, _item, _price, _dp, _margin, _tenor]) {
       c.dispose();
+    }
     super.dispose();
   }
 
@@ -813,8 +856,12 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
         [price, dp, margin].every((value) => value % 1000 == 0)) {
       final value = _calculator.calculate(
           itemPrice: price, downPayment: dp, margin: margin, tenor: tenor);
-      if (mounted) setState(() => _calculation = value);
-    } else if (mounted) setState(() => _calculation = null);
+      if (mounted) {
+        setState(() => _calculation = value);
+      }
+    } else if (mounted) {
+      setState(() => _calculation = null);
+    }
   }
 
   @override
@@ -924,9 +971,8 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                                         _calculation!.salePrice)),
                                 _SummaryRow(
                                     label: 'Total pembayaran pelanggan',
-                                    value: formatCurrency(
-                                        _number(_dp) +
-                                            _calculation!.salePrice)),
+                                    value: formatCurrency(_number(_dp) +
+                                        _calculation!.salePrice)),
                                 _SummaryRow(
                                     label: _calculation!.hasFinalAdjustment
                                         ? 'Angsuran reguler / bulan'
@@ -945,7 +991,7 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                     child: FilledButton.icon(
                         onPressed: () {
                           if (_formKey.currentState!.validate() &&
-                              _calculation != null)
+                              _calculation != null) {
                             Navigator.pop(
                                 context,
                                 Financing(
@@ -960,6 +1006,7 @@ class _FinancingFormSheetState extends State<_FinancingFormSheet> {
                                     margin: _number(_margin),
                                     tenor: _number(_tenor),
                                     startDate: DateTime.now()));
+                          }
                         },
                         icon: const Icon(Icons.check_circle_outline),
                         label: const Text('Simpan Pembiayaan'))),

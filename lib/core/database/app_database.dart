@@ -11,7 +11,7 @@ class AppDatabase {
   static final instance = AppDatabase._();
 
   static const databaseName = 'syari_finance.db';
-  static const schemaVersion = 4;
+  static const schemaVersion = 5;
 
   Database? _database;
   Completer<void>? _restoreCompleter;
@@ -76,6 +76,7 @@ class AppDatabase {
             FOREIGN KEY(installment_id) REFERENCES installments(id))''');
           await _createOrderTables(db);
           await _createPaymentIndexes(db);
+          await _createUserTables(db);
           await db.execute(
             '''CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)''',
           );
@@ -95,6 +96,9 @@ class AppDatabase {
             await db
                 .execute('ALTER TABLE payments ADD COLUMN reversal_of TEXT');
             await _createPaymentIndexes(db);
+          }
+          if (oldVersion < 5) {
+            await _createUserTables(db);
           }
         },
       );
@@ -123,6 +127,18 @@ class AppDatabase {
       FOREIGN KEY(customer_id) REFERENCES customers(id))''');
     await db.execute(
       'CREATE INDEX idx_orders_customer_status ON orders(customer_id, status)',
+    );
+  }
+
+  Future<void> _createUserTables(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS app_users (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL,
+      pin_salt TEXT NOT NULL, pin_hash TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_app_users_active ON app_users(is_active, name)',
     );
   }
 

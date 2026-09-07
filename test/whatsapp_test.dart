@@ -1,7 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:syari_finance/core/utils/whatsapp.dart';
 
 void main() {
+  setUpAll(() => initializeDateFormatting('id_ID'));
+
   group('normalizeWhatsAppNumber', () {
     test('converts Indonesian local numbers to country-code format', () {
       expect(normalizeWhatsAppNumber('0812-3456-7890'), '6281234567890');

@@ -246,9 +246,9 @@ class _ProcessGuide extends StatelessWidget {
   const _ProcessGuide();
 
   @override
-  Widget build(BuildContext context) => Card(
-        color: const Color(0xFFF0F6F3),
-        child: const Padding(
+  Widget build(BuildContext context) => const Card(
+        color: Color(0xFFF0F6F3),
+        child: Padding(
           padding: EdgeInsets.all(14),
           child: Text(
             '1. Pesanan  •  2. Uang kesungguhan  •  3. Barang dibeli  •  4. Kepemilikan dikonfirmasi  •  5. Akad',
